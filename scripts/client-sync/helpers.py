@@ -50,6 +50,20 @@ def backup_path(path: Path) -> None:
         print(f"  Warning: Could not backup {path}: {e}")
 
 
+def parse_duration_seconds(value: str | int | float) -> int:
+    """Parse duration string (e.g. '30s', '1m20s', '2h') or number into seconds.
+    Uses pytimeparse. Returns integer seconds. Raises ValueError for invalid input."""
+    from pytimeparse import parse as timeparse
+
+    if isinstance(value, (int, float)):
+        return int(value)
+    s = str(value).strip()
+    result = timeparse(s)
+    if result is None:
+        raise ValueError(f"Invalid duration: {value!r}")
+    return int(result)
+
+
 def to_kebab_case(name: str) -> str:
     """Converts snake_case or mixed strings to kebab-case."""
     s = re.sub(r"[_ ]+", "-", name)

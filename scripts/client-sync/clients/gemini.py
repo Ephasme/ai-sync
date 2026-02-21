@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from helpers import deep_merge, ensure_dir, write_content_if_different
+from helpers import deep_merge, ensure_dir, parse_duration_seconds, write_content_if_different
 
 from .base import Client
 
@@ -51,6 +51,11 @@ tools: {tools_list}
             entry["url"] = server.get("url", "")
             if "httpUrl" in server:
                 entry["httpUrl"] = server["httpUrl"]
+        if "timeout" in server:
+            try:
+                entry["timeout"] = parse_duration_seconds(server["timeout"]) * 1000  # ms
+            except ValueError:
+                pass
         return entry
 
     def sync_mcp(self, servers: dict, secrets: dict, for_client) -> None:
@@ -72,10 +77,10 @@ tools: {tools_list}
                 pass
         if "mcpServers" not in existing:
             existing["mcpServers"] = {}
-        existing["mcpServers"] = deep_merge(
-            dict(existing["mcpServers"]),
-            gemini_mcp,
-        )
+        merged = dict(existing["mcpServers"])
+        for sid, entry in gemini_mcp.items():
+            merged[sid] = entry  # full replace so deprecated keys are removed
+        existing["mcpServers"] = merged
         write_content_if_different(
             settings_path, json.dumps(existing, indent=2), backup=False
         )

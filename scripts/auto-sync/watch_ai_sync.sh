@@ -3,9 +3,7 @@ set -euo pipefail
 
 ROOT="/Users/loup/code/perso/ai-tools"
 SYNC_SCRIPT="${ROOT}/scripts/client-sync/sync_ai_configs.py"
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-
-WATCHEXEC="/opt/homebrew/bin/watchexec"
+WATCHEXEC="$(command -v watchexec)"
 NOTIFY_SCRIPT="${ROOT}/scripts/auto-sync/notify_sync.sh"
 ERR_LOG="/tmp/ai-tools-sync.err.log"
 
@@ -58,4 +56,4 @@ exec "$WATCHEXEC" \
   -w "${ROOT}/config/prompts" \
   -w "${ROOT}/config/skills" \
   -w "${ROOT}/config/client-settings" \
-  -- "output=\$(${VENV_PYTHON} \"${SYNC_SCRIPT}\" 2>&1); exit_code=\$?; echo \"\$output\"; summary=\$(${VENV_PYTHON} \"${ROOT}/scripts/shared/sync_summary.py\" 2>/dev/null || true); [ -n \"\$summary\" ] || summary='agents=? skills=? servers=?'; if [ \"\$exit_code\" -eq 0 ]; then msg=\"Sync finished (\$summary)\"; else msg=\"Sync failed (\$summary)\"; fi; \"${NOTIFY_SCRIPT}\" \"\$msg\""
+  -- "output=\$(${VENV_PYTHON} \"${SYNC_SCRIPT}\" --plain 2>&1); exit_code=\$?; echo \"\$output\"; summary=\$(${VENV_PYTHON} \"${ROOT}/scripts/shared/sync_summary.py\" 2>/dev/null || true); [ -n \"\$summary\" ] || summary='agents=? skills=? servers=?'; if [ \"\$exit_code\" -eq 0 ]; then msg=\"Sync finished (\$summary)\"; else err=\$(echo \"\$output\" | grep 'Sync failed:' | head -1 | sed 's/.*Sync failed: //' | head -c 200); if [ -n \"\$err\" ]; then msg=\"Sync failed: \$err\"; else msg=\"Sync failed (\$summary)\"; fi; fi; \"${NOTIFY_SCRIPT}\" \"\$msg\""

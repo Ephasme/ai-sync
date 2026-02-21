@@ -16,6 +16,7 @@ servers:
     command: uvx
     args: ["mcp-server-fetch"]
     enabled: true
+    timeout: 30s
 
   playwright:
     method: stdio

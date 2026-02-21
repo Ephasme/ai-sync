@@ -9,6 +9,7 @@ from helpers import (
     copy_file_if_different,
     deep_merge,
     ensure_dir,
+    parse_duration_seconds,
     write_content_if_different,
 )
 
@@ -62,6 +63,13 @@ web_search = "{web_search_val}"
             table["args"] = server.get("args", [])
             if env_secrets:
                 table["env"] = {k: str(v) if v is not None else "" for k, v in env_secrets.items()}
+        if "timeout" in server:
+            try:
+                sec = parse_duration_seconds(server["timeout"])
+                table["startup_timeout_sec"] = sec
+                table["tool_timeout_sec"] = sec
+            except ValueError:
+                pass
         return table
 
     def sync_mcp(self, servers: dict, secrets: dict, for_client: Callable[[dict, str], bool]) -> None:
@@ -89,10 +97,10 @@ web_search = "{web_search_val}"
                     existing = tomli.load(f)
             if "mcp_servers" not in existing:
                 existing["mcp_servers"] = {}
-            existing["mcp_servers"] = deep_merge(
-                dict(existing["mcp_servers"]),
-                codex_mcp,
-            )
+            merged = dict(existing["mcp_servers"])
+            for sid, entry in codex_mcp.items():
+                merged[sid] = entry  # full replace so deprecated keys (e.g. timeout) are removed
+            existing["mcp_servers"] = merged
             write_content_if_different(config_path, tomli_w.dumps(existing), backup=False)
         except (OSError, tomli.TOMLDecodeError) as e:
             print(f"  Warning: Could not update Codex config: {e}")

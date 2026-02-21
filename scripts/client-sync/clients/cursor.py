@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from helpers import deep_merge, ensure_dir, write_content_if_different
+from helpers import deep_merge, ensure_dir, parse_duration_seconds, write_content_if_different
 
 from .base import Client
 
@@ -52,6 +52,11 @@ is_background: {is_background}
             entry["auth"] = {k: str(v) if v is not None else "" for k, v in secret_srv["auth"].items()}
         if server.get("method") in ("http", "sse"):
             entry["url"] = server.get("url", "")
+        if "timeout" in server:
+            try:
+                entry["timeout"] = parse_duration_seconds(server["timeout"]) * 1000  # ms
+            except ValueError:
+                pass
         return entry
 
     def sync_mcp(self, servers: dict, secrets: dict, for_client) -> None:
@@ -71,7 +76,10 @@ is_background: {is_background}
                     existing = json.load(f)
             except (json.JSONDecodeError, OSError):
                 pass
-        merged = deep_merge(existing, {"mcpServers": cursor_mcp})
+        merged_servers = dict(existing.get("mcpServers", {}))
+        for sid, entry in cursor_mcp.items():
+            merged_servers[sid] = entry  # full replace so deprecated keys are removed
+        merged = deep_merge(existing, {"mcpServers": merged_servers})
         write_content_if_different(
             mcp_path, json.dumps(merged, indent=2), backup=False
         )

@@ -4,8 +4,28 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LABEL="com.loup.ai-tools.sync"
 PLIST_PATH="${HOME}/Library/LaunchAgents/${LABEL}.plist"
+VENV_DIR="${ROOT}/scripts/.venv"
 WATCHEXEC="/opt/homebrew/bin/watchexec"
 PYTHON="/opt/homebrew/bin/python3"
+
+FORCE=0
+case "${1:-}" in
+  --force) FORCE=1; shift ;;
+  -h|--help)
+    echo "Usage: $0 [--force]"
+    echo "  --force  Discard and reinstall from scratch (removes venv, LaunchAgent)"
+    exit 0
+    ;;
+esac
+
+if [ "$FORCE" -eq 1 ]; then
+  echo "Force reinstall: discarding existing auto-sync setup..."
+  echo "  Stopping LaunchAgent..."
+  launchctl bootout "gui/$(id -u)" "$PLIST_PATH" 2>/dev/null || true
+  [ -f "$PLIST_PATH" ] && /bin/rm -f "$PLIST_PATH"
+  [ -d "$VENV_DIR" ] && /bin/rm -rf "$VENV_DIR"
+  echo "  Removed LaunchAgent and venv."
+fi
 
 if [ ! -x "$PYTHON" ]; then
   PYTHON="/usr/bin/python3"
@@ -21,6 +41,7 @@ fi
 
 if [ -x /opt/homebrew/bin/brew ]; then
   if [ ! -x "$WATCHEXEC" ]; then
+    echo "Installing watchexec..."
     /opt/homebrew/bin/brew install watchexec
   fi
 else
@@ -30,9 +51,10 @@ else
   fi
 fi
 
-VENV_DIR="${ROOT}/scripts/.venv"
 if [ ! -x "${VENV_DIR}/bin/python3" ]; then
+  echo "Creating venv at ${VENV_DIR}..."
   "$PYTHON" -m venv "$VENV_DIR"
+  echo "Installing dependencies..."
   "$VENV_DIR/bin/pip" install -r "${ROOT}/scripts/client-sync/requirements.txt"
 fi
 
@@ -57,7 +79,10 @@ cat <<PLIST > "$PLIST_PATH"
 
     <key>ProgramArguments</key>
     <array>
-      <string>${ROOT}/scripts/auto-sync/watch_ai_sync.sh</string>
+      <string>/bin/zsh</string>
+      <string>-l</string>
+      <string>-c</string>
+      <string>source ~/.zshrc 2>/dev/null || true; exec ${ROOT}/scripts/auto-sync/watch_ai_sync.sh</string>
     </array>
 
     <key>RunAtLoad</key>

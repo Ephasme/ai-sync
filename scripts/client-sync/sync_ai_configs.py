@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import re
 import shutil
 import subprocess
@@ -591,6 +592,7 @@ def main() -> int:
     if tool_errors:
         err_text = "\n".join(f"  • {e}" for e in tool_errors)
         display.panel(err_text, title="Missing or invalid required tools", style="error")
+        print(f"Sync failed: {'; '.join(tool_errors)}", file=sys.stderr)
         return 1
 
     if args.capture_oauth:
@@ -601,12 +603,14 @@ def main() -> int:
     if args.force:
         versions = _detect_client_versions()
         if not versions:
+            msg = "No client versions detected; ensure codex/cursor/gemini CLIs are on PATH"
             display.panel(
                 f"No client versions detected.\n\nPATH={os.environ.get('PATH', '')}\n\n"
                 "Ensure codex/cursor/gemini CLIs are installed and on PATH.",
                 title="Error",
                 style="error",
             )
+            print(f"Sync failed: {msg}", file=sys.stderr)
             return 1
         versions_path = CWD / "scripts" / ".client-versions.json"
         versions_path.write_text(json.dumps(versions, indent=2) + "\n", encoding="utf-8")
@@ -616,14 +620,17 @@ def main() -> int:
         ok, msg = _check_client_versions(versions_path)
         if not ok:
             display.panel(msg, title="Version check failed", style="error")
+            print(f"Sync failed: {msg}", file=sys.stderr)
             return 1
 
     if not SOURCE_PROMPTS.exists() or not SOURCE_SKILLS.exists():
+        msg = "config/prompts or config/skills directories not found"
         display.panel(
             "config/prompts or config/skills directories not found.",
             title="Error",
             style="error",
         )
+        print(f"Sync failed: {msg}", file=sys.stderr)
         return 1
 
     agent_stems = sorted(p.stem for p in SOURCE_PROMPTS.glob("*.md"))
@@ -632,11 +639,13 @@ def main() -> int:
         if d.is_dir() and (d / "SKILL.md").exists()
     )
     if not agent_stems and not skill_names:
+        msg = "No agents or skills found in config"
         display.panel(
             "No agents or skills found in config.",
             title="Error",
             style="error",
         )
+        print(f"Sync failed: {msg}", file=sys.stderr)
         return 1
 
     if args.no_interactive or args.plain:
@@ -651,6 +660,7 @@ def main() -> int:
         opts = _run_interactive_prompts(agent_stems, skill_names, clear_default=args.clear)
         if opts is None:
             display.print("Cancelled", style="warning")
+            print("Sync failed: Cancelled", file=sys.stderr)
             return 1
         options = opts
 
@@ -681,4 +691,15 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except Exception as e:
+        msg = f"Sync failed: {e}"
+        try:
+            display.panel(str(e), title="Sync failed", style="error")
+        except NameError:
+            pass
+        print(msg, file=sys.stderr)
+        raise SystemExit(1)
