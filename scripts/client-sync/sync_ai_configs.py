@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Sync AI configs (agents, skills, MCP servers, client config) to Codex, Cursor, Gemini."""
 import argparse
+import json
+import re
+import shutil
+import subprocess
+import sys
+import os
 from pathlib import Path
 
 import yaml
@@ -31,6 +37,7 @@ SKIP_PATTERNS = {".venv", "node_modules", "__pycache__", ".git", ".DS_Store"}
 
 
 GENERIC_METADATA_KEYS = {"slug", "name", "description"}
+VERSION_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 
 def get_metadata(prompt_path: Path, content: str) -> dict:
@@ -67,6 +74,71 @@ def get_metadata(prompt_path: Path, content: str) -> dict:
             print(f"  Warning: Failed to load metadata for {prompt_path.name}: {e}")
 
     return result
+
+
+def _run(cmd: list[str]) -> str:
+    try:
+        proc = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        return (proc.stdout or "") + (proc.stderr or "")
+    except FileNotFoundError:
+        return ""
+    except subprocess.CalledProcessError as exc:
+        return (exc.stdout or "") + (exc.stderr or "")
+
+
+def _detect_client_versions() -> dict[str, str]:
+    versions: dict[str, str] = {}
+    commands: dict[str, list[str]] = {
+        "codex": ["codex", "--version"],
+        "cursor": ["cursor", "--version"],
+        "gemini": ["gemini", "--version"],
+    }
+    # Ensure common install paths are on PATH for discovery.
+    path = os.environ.get("PATH", "")
+    extra_bins = ["/opt/homebrew/bin", "/usr/local/bin"]
+    for extra in extra_bins:
+        if extra and extra not in path.split(":"):
+            path = f"{extra}:{path}" if path else extra
+    os.environ["PATH"] = path
+
+    for name, cmd in commands.items():
+        cmd_path = shutil.which(cmd[0])
+        if not cmd_path:
+            continue
+        output = _run([cmd_path, *cmd[1:]])
+        if not output.strip():
+            continue
+        match = VERSION_RE.search(output)
+        if not match:
+            continue
+        versions[name] = f"{match.group(1)}.{match.group(2)}.{match.group(3)}"
+    return versions
+
+
+def _check_client_versions(versions_path: Path) -> tuple[bool, str]:
+    if not versions_path.exists():
+        return False, f"Missing version lock file: {versions_path}"
+    try:
+        expected = json.loads(versions_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return False, f"Failed to read {versions_path}: {exc}"
+    if not isinstance(expected, dict) or not expected:
+        return False, f"No versions stored in {versions_path}"
+
+    current = _detect_client_versions()
+    if not current:
+        return False, "No client versions detected; ensure clients are installed and on PATH"
+
+    for client, expected_version in expected.items():
+        if client not in current:
+            return False, f"Unable to detect {client} version (command missing or unreadable)"
+        exp_match = VERSION_RE.search(str(expected_version))
+        cur_match = VERSION_RE.search(str(current[client]))
+        if not exp_match or not cur_match:
+            return False, f"Invalid version for {client} (expected {expected_version}, got {current[client]})"
+        if exp_match.group(1, 2) != cur_match.group(1, 2):
+            return False, f"Version mismatch: {client} expected {exp_match.group(1)}.{exp_match.group(2)}.x got {current[client]}"
+    return True, "OK"
 
 
 def _load_servers() -> dict:
@@ -175,7 +247,12 @@ def sync_mcp_servers() -> None:
     if not secrets.get("servers"):
         print("  Warning: No secrets/secrets.yaml found; env/auth will be empty.")
 
+    server_ids = [sid for sid, srv in servers.items() if srv.get("enabled", True)]
+    if server_ids:
+        print(f"  Servers: {', '.join(server_ids)}")
+
     for client in CLIENTS:
+        print(f"  Client: {client.name}")
         client.sync_mcp(servers, secrets, _for_client)
 
     secrets_dir = SOURCE_MCP / "secrets"
@@ -206,6 +283,7 @@ def sync_client_config() -> None:
 
     settings = settings or {}
     for client in CLIENTS:
+        print(f"  Client: {client.name}")
         client.sync_client_config(settings)
 
 
@@ -226,7 +304,7 @@ def capture_oauth_cache() -> None:
     print("--- Capture complete ---")
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(
         description="Sync AI configs (agents, skills, MCP servers) to Codex, Cursor, Gemini."
     )
@@ -235,19 +313,41 @@ def main() -> None:
         action="store_true",
         help="Capture OAuth token caches into config/mcp-servers/secrets/ for portability.",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force sync and overwrite scripts/.client-versions.json with local client versions.",
+    )
     args = parser.parse_args()
 
     if args.capture_oauth:
         with backup_context(BACKUP_ROOT_PATH):
             capture_oauth_cache()
-        return
+        return 0
+
+    if args.force:
+        versions = _detect_client_versions()
+        if not versions:
+            print("Error: No client versions detected; cannot update scripts/.client-versions.json.")
+            print(f"PATH={os.environ.get('PATH', '')}")
+            print("Ensure codex/cursor/gemini CLIs are installed and on PATH.")
+            return 1
+        versions_path = CWD / "scripts" / ".client-versions.json"
+        versions_path.write_text(json.dumps(versions, indent=2) + "\n", encoding="utf-8")
+        print(f"Updated {versions_path}")
+    else:
+        versions_path = CWD / "scripts" / ".client-versions.json"
+        ok, msg = _check_client_versions(versions_path)
+        if not ok:
+            print(f"Error: {msg}")
+            return 1
 
     print("Starting Sync...")
     print(f"Source: {CWD}")
 
     if not SOURCE_PROMPTS.exists() or not SOURCE_SKILLS.exists():
         print("Error: Source 'config/prompts' or 'config/skills' directories not found.")
-        return
+        return 1
 
     with backup_context(BACKUP_ROOT_PATH):
         sync_agents()
@@ -256,7 +356,8 @@ def main() -> None:
         sync_client_config()
 
     print("\n--- Sync Complete ---")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

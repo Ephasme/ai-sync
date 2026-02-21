@@ -31,23 +31,19 @@ else
 fi
 
 VENV_DIR="${ROOT}/scripts/.venv"
-"$PYTHON" -m venv "$VENV_DIR"
-"$VENV_DIR/bin/pip" install -r "${ROOT}/scripts/client-sync/requirements.txt"
+if [ ! -x "${VENV_DIR}/bin/python3" ]; then
+  "$PYTHON" -m venv "$VENV_DIR"
+  "$VENV_DIR/bin/pip" install -r "${ROOT}/scripts/client-sync/requirements.txt"
+fi
 
 /bin/chmod +x "${ROOT}/scripts/auto-sync/watch_ai_sync.sh"
 /bin/chmod +x "${ROOT}/scripts/auto-sync/notify_sync.sh"
-/bin/chmod +x "${ROOT}/scripts/shared/check_client_versions.py"
 /bin/chmod +x "${ROOT}/scripts/shared/sync_summary.py"
 
 VERSION_LOCK="${ROOT}/scripts/.client-versions.json"
 if [ ! -f "$VERSION_LOCK" ]; then
   echo "Missing ${VERSION_LOCK}. This repo is version-bound; do not generate it locally." >&2
   echo "Pull the file from the repo, then re-run this installer." >&2
-  exit 1
-fi
-if ! "$VENV_DIR/bin/python3" "${ROOT}/scripts/shared/check_client_versions.py" --check "$VERSION_LOCK" >/dev/null; then
-  echo "Client version mismatch detected. Refusing to continue." >&2
-  echo "Run ${ROOT}/scripts/shared/check_client_versions.py --check ${VERSION_LOCK} for details." >&2
   exit 1
 fi
 

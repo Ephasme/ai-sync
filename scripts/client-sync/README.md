@@ -42,6 +42,7 @@ python scripts/client-sync/sync_ai_configs.py
 ### Options
 
 - `--capture-oauth` — Copy OAuth token caches from clients into `config/mcp-servers/secrets/`
+- `--force` — Update `scripts/.client-versions.json` with local client versions, then sync
 
 ## Testing
 

@@ -79,8 +79,7 @@ Notes:
 │   │   ├── clients/
 │   │   ├── tests/
 │   │   └── ...
-│   └── shared/                # Shared helpers (version checks, summaries)
-│       ├── check_client_versions.py
+│   └── shared/                # Shared helpers (summaries)
 │       └── sync_summary.py
 ├── scripts/requirements.txt
 ├── scripts/.client-versions.json
