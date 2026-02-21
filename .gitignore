@@ -1,0 +1,51 @@
+# MCP secrets - never commit; sync via secure private channel
+config/mcp-servers/secrets/*
+!config/mcp-servers/secrets/secrets.example.yaml
+
+# Knowledge base
+knowledge-base/*
+
+# Sync backups
+.sync_backups/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+scripts/.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Type checkers & linters
+.ruff_cache/
+.mypy_cache/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Client config (local overrides; example stays tracked)
+config/client-settings/settings.yaml
+
+# Logs & generated
+*.log
+knowledge-base/eval-logs.jsonl
+
+# Node (for skills with .mjs scripts)
+node_modules/
+
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store

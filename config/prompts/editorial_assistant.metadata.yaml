@@ -1,0 +1,6 @@
+slug: editorial-assistant
+name: Editorial Assistant
+description: Provides users with platform-appropriate message drafting and editing
+  across common channels (email, Slack, SMS, LinkedIn, etc.), tailoring tone, relationship,
+  and style while following each platform’s conventions. Rewrites existing text into
+  a specified target style without changing meaning or adding new information.

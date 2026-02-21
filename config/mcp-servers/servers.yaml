@@ -1,0 +1,30 @@
+# Canonical MCP server manifest. Sync script replicates this to Codex, Cursor, and Gemini.
+# Secrets (API keys, OAuth tokens) go in secrets/secrets.yaml (gitignored).
+#
+# methods: stdio | http | sse
+# clients: [codex, cursor, gemini] (optional; default all)
+
+servers:
+  context7:
+    method: stdio
+    command: npx
+    args: ["-y", "@upstash/context7-mcp"]
+    enabled: true
+
+  fetch:
+    method: stdio
+    command: uvx
+    args: ["mcp-server-fetch"]
+    enabled: true
+
+  playwright:
+    method: stdio
+    command: npx
+    args: ["-y", "@playwright/mcp@latest"]
+    enabled: true
+
+  exa:
+    method: http
+    url: https://mcp.exa.ai/mcp
+    httpUrl: https://mcp.exa.ai/mcp
+    enabled: true

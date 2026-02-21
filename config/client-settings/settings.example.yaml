@@ -1,0 +1,17 @@
+# Copy to settings.yaml. Schema:
+#
+#   subagents: true | false
+#     Enable multi-agents, sub-agents, child-prompts, AGENTS.md scope, etc.
+#
+#   mode: ask | ask-once | full-access
+#     ask         = prompt for approval every time
+#     ask-once    = auto-approve safe ops, ask for risky ones (ask-first where supported)
+#     full-access = no approval prompts, no restrictions (YOLO)
+#
+# Client mapping (from official docs):
+#   Codex:  approval_policy, sandbox_mode, features.multi_agent, features.child_agents_md
+#   Gemini: general.defaultApprovalMode, experimental.enableAgents
+#   Cursor: permissions.allow, permissions.deny (Shell, Read, Write, WebFetch, Mcp)
+
+subagents: true
+mode: ask-once
