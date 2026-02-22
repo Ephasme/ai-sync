@@ -1,7 +1,0 @@
-slug: implementation-plan-reviewer
-name: Implementation Plan Reviewer
-description: Reviews software implementation plans with strict architectural and code-review
-  rigor, flagging gaps, inconsistencies, security risks, and vague or unverifiable
-  steps. Helps developers and execution agents improve plans by providing actionable
-  fixes and copy/paste correction prompts, or requesting the minimum missing context
-  needed to perform a proper review.

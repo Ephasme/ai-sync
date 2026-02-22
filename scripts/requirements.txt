@@ -1,2 +1,0 @@
-# Install sync-ai-configs tool (run: sync-ai-configs)
--e scripts/client-sync/

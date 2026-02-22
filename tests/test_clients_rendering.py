@@ -1,6 +1,6 @@
-from sync_ai_configs.clients.codex import CodexClient
-from sync_ai_configs.clients.cursor import CursorClient
-from sync_ai_configs.clients.gemini import GeminiClient
+from ai_sync.clients.codex import CodexClient
+from ai_sync.clients.cursor import CursorClient
+from ai_sync.clients.gemini import GeminiClient
 
 
 def test_cursor_build_mcp_entry() -> None:

@@ -1,121 +1,116 @@
 # AI Research Doc
 
-A single canonical repository for AI agent configuration across **Codex**, **Cursor**, and **Gemini CLI**. Define agents, skills, MCP servers, and client settings once; sync them to every client with one command.
+A self-contained local config store for **Codex**, **Cursor**, and **Gemini CLI**. Define agents, skills, MCP servers, and client settings once in `~/.ai-sync/`, then sync them to every client with one command.
+
+License: PolyForm Noncommercial 1.0.0 (non-commercial use only).
 
 ## Overview
 
 This repo provides:
 
+- **The ai-sync CLI** – Manage `~/.ai-sync/` and run syncs
 - **Agents** – Sub-agents derived from prompts with per-client metadata
 - **Skills** – Agent Skills (SKILL.md) mirrored to all clients
 - **MCP servers** – Model Context Protocol servers with centralized config and secrets
 - **Client configuration** – Generic settings (subagents, mode) derived into client-specific configs
 - **OAuth token portability** – Manual copy of client OAuth caches across machines (automated capture/restore planned)
 
-All syncing is **idempotent**: identical targets cause no writes; changed targets are backed up (`tar.gz`) before overwrite.
+All syncing is **idempotent**: identical targets cause no writes; changed targets overwrite in place.
 
 ---
+
+## Install
+
+### End users (recommended)
+
+```bash
+pipx install ai-sync
+```
+
+### Local development
+
+```bash
+pip install -e ".[dev]"
+```
 
 ## Quick start
 
 ```bash
-pip install -r scripts/requirements.txt
-sync-ai-configs
+ai-sync setup --op-account NAME
+ai-sync import --repo /path/to/config-repo   # optional
+ai-sync sync
 ```
-
-### Auto-sync (LaunchAgent + notifications)
-
-Use the installer to set up a LaunchAgent that watches changes and syncs automatically with notifications:
-
-```bash
-./scripts/auto-sync/install_auto_sync.sh --op-account NAME
-```
-
-Requires `--op-account` (or `OP_ACCOUNT` env). Notes:
-- Creates a venv at `scripts/.venv/` and runs syncs inside it.
-- Enforces the repo-owned `scripts/.client-versions.json` (major/minor must match installed clients).
-- Auto-sync is blocked and a notification is shown if client major/minor versions differ.
 
 ### Prerequisites
 
 - Python 3.10+
 - [Codex](https://developers.openai.com/codex), [Cursor](https://cursor.com), and/or [Gemini CLI](https://geminicli.com) installed
+- 1Password Desktop app (for `OP_ACCOUNT`) or `OP_SERVICE_ACCOUNT_TOKEN` for service accounts
 - For MCP stdio servers: Node.js (`npx`), [uv](https://docs.astral.sh/uv/) (`uvx` for workspace-mcp), `pip install mcp-server-fetch` for fetch
 
 ---
 
-## Repository structure
+## Project structure
+
+This repo ships the sync tool. Runtime data lives in `~/.ai-sync/`.
 
 ```
+Repo:
 .
+├── src/
+│   └── ai_sync/               # Python: ai-sync
+│       └── .client-versions.json  # Supported client versions (packaged)
+├── tests/
+├── pyproject.toml
+└── README.md
+
+Runtime:
+~/.ai-sync/
+├── config.toml                # op_account, secret_provider
+├── .env.tpl                   # MCP secrets (op:// refs resolved via 1Password)
 ├── config/
-│   ├── prompts/               # Agent prompts (source of truth)
-│   ├── senior_software_engineer.md
-│   ├── senior_software_engineer.metadata.yaml
-│   └── ...
-│   ├── skills/                # Agent Skills
-│   │   ├── create-skill/
-│   │   │   └── SKILL.md
-│   │   └── ...
+│   ├── prompts/
+│   ├── skills/
 │   ├── mcp-servers/
-│   │   ├── servers.example.yaml  # Template – copy to servers.yaml
-│   │   └── servers.yaml         # Gitignored – your MCP manifest
 │   └── client-settings/
-│       ├── settings.example.yaml  # Template (tracked)
-│       └── settings.yaml          # Local overrides (gitignored; copy from example)
-├── scripts/
-│   ├── auto-sync/             # LaunchAgent + notifications
-│   │   ├── install_auto_sync.sh
-│   │   ├── watch_sync.py
-│   │   ├── run_sync_once.sh
-│   │   └── notify_sync.sh
-│   ├── client-sync/           # Python: sync-ai-configs
-│   │   ├── pyproject.toml
-│   │   ├── sync_ai_configs/
-│   │   ├── tests/
-│   │   └── ...
-│   └── shared/                # Shared helpers (summaries)
-│       └── sync_summary.py
-├── scripts/requirements.txt
-├── scripts/.client-versions.json
-├── scripts/.venv/
-├── .env.tpl                     # MCP secrets (op:// refs resolved via 1Password)
-└── .sync_backups/               # Tar.gz backups before overwrite
+└── cache/
 ```
 
 ---
 
-## Sync script
+## ai-sync
 
 ### Usage
 
 ```bash
-sync-ai-configs
+ai-sync setup --op-account NAME
+ai-sync import --repo /path/to/config-repo   # optional
+ai-sync sync
 ```
 
-Run from the **repository root** so the script finds `config/prompts/`, `config/skills/`, `config/mcp-servers/`, `config/client-settings/`.
+Running `ai-sync` with no subcommand defaults to `sync`.
+Other commands: `ai-sync setup`, `ai-sync import`, `ai-sync doctor`.
 
-### Options
+### Sync options
 
 | Option | Description |
 |--------|--------------|
 | (none) | Full sync: agents → skills → MCP servers → client config |
-| `--force` | Update `scripts/.client-versions.json` with local client versions, then sync |
+| `--force` | Update the packaged client version lock (dev-only), then sync |
 | `--no-interactive` | Skip interactive prompts |
 | `--plain` | Plain output (implies `--no-interactive`) |
 | `--override` / `--override-json` | Override manifest leaf values (e.g. `/servers/context7/enabled=false`) |
-| `--op-account` | 1Password account name for desktop auth (install export in shell rc) |
 
 ### Sync order
 
-1. **Agents** – From `config/prompts/*.md` → `~/.codex/agents/`, `~/.cursor/agents/`, `~/.gemini/agents/`
-2. **Skills** – From `config/skills/*/` → `~/.codex/skills/`, `~/.cursor/skills/`, `~/.gemini/skills/`
-3. **MCP servers** – From `config/mcp-servers/servers.yaml` → client MCP configs, MCP instructions
-4. **Client config** – From `config/client-settings/settings.yaml` → approval policy, sandbox, features
+1. **Agents** – From `~/.ai-sync/config/prompts/*.md` → `~/.codex/agents/`, `~/.cursor/agents/`, `~/.gemini/agents/`
+2. **Skills** – From `~/.ai-sync/config/skills/*/` → `~/.codex/skills/`, `~/.cursor/skills/`, `~/.gemini/skills/`
+3. **MCP servers** – From `~/.ai-sync/config/mcp-servers/servers.yaml` → client MCP configs, MCP instructions
+4. **Client config** – From `~/.ai-sync/config/client-settings/settings.yaml` → approval policy, sandbox, features
 
 ### Sync strategy
 
-- **Agents, skills, client config**: Files overwritten if they exist. Untracked agents/skills (not in config/prompts/ or config/skills/) are left alone.
+- **Agents, skills, client config**: Files overwritten if they exist. Untracked agents/skills (not in `~/.ai-sync/config/prompts/` or `~/.ai-sync/config/skills/`) are left alone.
 - **Client config**: Deep-merge with existing; ai-tools keys overwrite on conflict.
 - **MCP servers**: Merged with existing; managed servers updated, user-added servers preserved.
 
@@ -125,15 +120,15 @@ Run from the **repository root** so the script finds `config/prompts/`, `config/
 
 ### Source structure
 
-Each agent lives in `config/prompts/`:
+Each agent lives in `~/.ai-sync/config/prompts/`:
 
 ```
-config/prompts/
+~/.ai-sync/config/prompts/
 ├── <agent_name>.md           # Prompt content (required)
 └── <agent_name>.metadata.yaml   # Optional metadata
 ```
 
-### Metadata schema (`config/prompts/<name>.metadata.yaml`)
+### Metadata schema (`~/.ai-sync/config/prompts/<name>.metadata.yaml`)
 
 Metadata is **generic** (client-agnostic). The sync script adapts it per client.
 
@@ -143,7 +138,7 @@ Metadata is **generic** (client-agnostic). The sync script adapts it per client.
 | `name` | Display name | From filename |
 | `description` | Short description | Extracted from prompt |
 
-Untracked agents (in client but not in `config/prompts/`) are left alone.
+Untracked agents (in client but not in `~/.ai-sync/config/prompts/`) are left alone.
 
 ### Target layout per client
 
@@ -157,12 +152,12 @@ Untracked agents (in client but not in `config/prompts/`) are left alone.
 
 ## Skills
 
-Skills are directories under `config/skills/` with a `SKILL.md` file. The sync script mirrors each skill to all three clients.
+Skills are directories under `~/.ai-sync/config/skills/` with a `SKILL.md` file. The sync script mirrors each skill to all three clients.
 
 ### Structure
 
 ```
-config/skills/
+~/.ai-sync/config/skills/
 └── <skill-name>/
     ├── SKILL.md          # Required
     ├── reference.md      # Optional
@@ -170,7 +165,7 @@ config/skills/
     └── scripts/          # Optional; copied if present
 ```
 
-Paths containing `.venv`, `node_modules`, `__pycache__`, `.git`, or `.DS_Store` are skipped. Untracked skills (in client but not in `config/skills/`) are left alone.
+Paths containing `.venv`, `node_modules`, `__pycache__`, `.git`, or `.DS_Store` are skipped. Untracked skills (in client but not in `~/.ai-sync/config/skills/`) are left alone.
 
 ### Targets
 
@@ -182,7 +177,7 @@ Paths containing `.venv`, `node_modules`, `__pycache__`, `.git`, or `.DS_Store` 
 
 ## MCP servers
 
-### Manifest (`config/mcp-servers/servers.yaml`)
+### Manifest (`~/.ai-sync/config/mcp-servers/servers.yaml`)
 
 ```yaml
 servers:
@@ -196,11 +191,11 @@ servers:
     trust: true                        # Optional; Cursor/Gemini: auto-approve tools
 ```
 
-**STDIO servers** – `command`, `args`; env vars use `"${VAR}"` refs resolved from `.env.tpl`.
+**STDIO servers** – `command`, `args`; env vars use `"${VAR}"` refs resolved from `~/.ai-sync/.env.tpl`.
 
 **HTTP/SSE servers** – `url`, `httpUrl`; optional `bearer_token_env_var` for Codex.
 
-**HTTP with OAuth** – `httpUrl` + `oauth.enabled: true`; `clientId`/`clientSecret` from `.env.tpl` via `"${VAR}"`:
+**HTTP with OAuth** – `httpUrl` + `oauth.enabled: true`; `clientId`/`clientSecret` from `~/.ai-sync/.env.tpl` via `"${VAR}"`:
 
 ```yaml
   google-maps-grounding-lite:
@@ -224,9 +219,9 @@ servers:
 | google-workspace-pro | stdio | Gmail, Calendar, Drive (work @sherpas.com, separate OAuth) |
 | google-maps-grounding-lite | http | Maps grounding (OAuth) |
 
-### Secrets (`.env.tpl`)
+### Secrets (`~/.ai-sync/.env.tpl`)
 
-All MCP secrets live in `.env.tpl` at the repo root. Use `op://` references for 1Password:
+All MCP secrets live in `~/.ai-sync/.env.tpl`. Use `op://` references for 1Password:
 
 ```
 CONTEXT7_API_KEY=op://Private/AI Tools Secrets/CONTEXT7_API_KEY
@@ -237,7 +232,7 @@ GOOGLE_OAUTH_CLIENT_ID_PERSO=op://Private/AI Tools Secrets/GOOGLE_OAUTH_CLIENT_I
 
 In `servers.yaml`, reference them with `"${VAR_NAME}"` in each server's `env` or `oauth` block. The sync script resolves these at runtime via 1Password (requires `OP_ACCOUNT` or `OP_SERVICE_ACCOUNT_TOKEN`).
 
-**Requirements**: [1Password CLI](https://developer.1password.com/docs/cli) and either `OP_ACCOUNT` (desktop app) or `OP_SERVICE_ACCOUNT_TOKEN` (service account).
+**Requirements**: 1Password Desktop app (for `OP_ACCOUNT`) or `OP_SERVICE_ACCOUNT_TOKEN` (service account).
 
 ### Client targets
 
@@ -258,7 +253,7 @@ OAuth tokens are stored per client (e.g. `~/.gemini/mcp-oauth-tokens.json`). To 
 
 Single YAML definition → derived into Codex, Gemini, and Cursor.
 
-### Schema (`config/client-settings/settings.yaml`)
+### Schema (`~/.ai-sync/config/client-settings/settings.yaml`)
 
 Copy from `settings.example.yaml`. See that file for full schema.
 
@@ -300,29 +295,70 @@ Copy from `settings.example.yaml`. See that file for full schema.
 
 ## Dependencies
 
-The sync tool lives in `scripts/client-sync/` as a Python project:
+The sync tool is packaged from the repo root:
 
 ```bash
-pip install -e scripts/client-sync/
+pip install -e .
 ```
 
-Dependencies: `pyyaml>=6.0`, `tomli>=2.0`, `tomli-w>=1.0`, `watchfiles>=0.21`, and others (see `pyproject.toml`).
+Dependencies: `pyyaml>=6.0`, `tomli>=2.0`, `tomli-w>=1.0`, and others (see `pyproject.toml`).
 
 ### Testing
 
 ```bash
-pip install -e "scripts/client-sync[dev]"
-pytest scripts/client-sync/tests/
+pip install -e ".[dev]"
+pytest
 ```
+
+---
+
+## Packaging & Release
+
+This project is published to PyPI as `ai-sync`.
+
+### Release checklist
+
+1. Update version in `pyproject.toml`.
+2. Update README if anything changed in CLI behavior or setup.
+3. Install release tooling if needed:
+
+```bash
+python -m pip install --upgrade build twine
+```
+
+4. Build the package:
+
+```bash
+python -m build -w .
+```
+
+5. Check the artifacts:
+
+```bash
+python -m twine check dist/*
+```
+
+6. Upload to PyPI:
+
+```bash
+python -m twine upload dist/*
+```
+
+### Notes
+
+- Use `pipx install ai-sync` for end users.
+- Keep `ai-sync` as the only supported CLI name.
 
 ---
 
 ## .gitignore
 
+If you maintain a separate config repo for `ai-sync import`, consider ignoring:
+
 - `config/mcp-servers/servers.yaml` (copy from `servers.example.yaml`)
 - `config/client-settings/settings.yaml` (copy from `settings.example.yaml`)
+- `.env.tpl`
 - `knowledge-base/*`
-- `.sync_backups/`
 - `.env`, Python bytecode, virtual envs, `.pytest_cache/`, `node_modules/`, `.DS_Store`, etc.
 
 ---
@@ -331,35 +367,35 @@ pytest scripts/client-sync/tests/
 
 ### New machine setup
 
-1. Clone repo
-2. `pip install -r scripts/requirements.txt`
-3. Copy `config/mcp-servers/servers.example.yaml` to `config/mcp-servers/servers.yaml`
-4. Ensure `.env.tpl` has correct 1Password refs; set `OP_ACCOUNT` or `OP_SERVICE_ACCOUNT_TOKEN`
-5. Copy `config/client-settings/settings.example.yaml` to `config/client-settings/settings.yaml` and edit if needed
-6. `sync-ai-configs`
+1. Clone repo (tooling only)
+2. `pip install -e ".[dev]"`
+3. `ai-sync setup --op-account NAME` (or set `OP_SERVICE_ACCOUNT_TOKEN`)
+4. `ai-sync import --repo /path/to/config-repo` (optional)
+5. Ensure `~/.ai-sync/.env.tpl` has correct 1Password refs
+6. `ai-sync sync`
 7. For Codex HTTP MCP servers: `source ~/.codex/mcp.env` in shell profile
 
 ### Adding an MCP server
 
-1. Edit `config/mcp-servers/servers.yaml`
-2. Add required vars to `.env.tpl` (use `op://` refs for secrets)
-3. Run `sync-ai-configs`
+1. Edit `~/.ai-sync/config/mcp-servers/servers.yaml`
+2. Add required vars to `~/.ai-sync/.env.tpl` (use `op://` refs for secrets)
+3. Run `ai-sync sync`
 
 ### Adding an agent
 
-1. Add `config/prompts/<name>.md`
-2. (Optional) Add `config/prompts/<name>.metadata.yaml`
-3. Run `sync-ai-configs`
+1. Add `~/.ai-sync/config/prompts/<name>.md`
+2. (Optional) Add `~/.ai-sync/config/prompts/<name>.metadata.yaml`
+3. Run `ai-sync sync`
 
 ### Adding a skill
 
-1. Create `config/skills/<skill-name>/SKILL.md`
-2. Run `sync-ai-configs`
+1. Create `~/.ai-sync/config/skills/<skill-name>/SKILL.md`
+2. Run `ai-sync sync`
 
 ### Changing client mode
 
-1. Edit `config/client-settings/settings.yaml` (`subagents`, `mode`)
-2. Run `sync-ai-configs`
+1. Edit `~/.ai-sync/config/client-settings/settings.yaml` (`subagents`, `mode`)
+2. Run `ai-sync sync`
 
 ---
 

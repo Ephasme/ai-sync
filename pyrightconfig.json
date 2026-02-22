@@ -1,5 +1,7 @@
 {
-  "extraPaths": ["scripts/client-sync"],
+  "include": ["src/ai_sync", "tests"],
   "typeCheckingMode": "basic",
-  "pythonVersion": "3.10"
+  "pythonVersion": "3.10",
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false
 }

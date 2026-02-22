@@ -1,14 +1,5 @@
-# MCP servers manifest - customize locally; never commit
-config/mcp-servers/servers.yaml
-
-# MCP secrets: commit secret references only, ignore generated artifacts
-config/mcp-servers/secrets/*
-
 # Knowledge base
 knowledge-base/*
-
-# Sync backups
-.sync_backups/
 
 # Python
 __pycache__/
@@ -16,6 +7,8 @@ __pycache__/
 *$py.class
 *.so
 .Python
+build/
+dist/
 scripts/.venv/
 venv/
 env/
@@ -35,11 +28,6 @@ htmlcov/
 # Environment & secrets
 .env
 .env.*
-!.env.example
-!.env.tpl
-
-# Client config (local overrides; example stays tracked)
-config/client-settings/settings.yaml
 
 # Logs & generated
 *.log

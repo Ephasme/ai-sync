@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sync_ai_configs.helpers import (
+from ai_sync.helpers import (
     copy_file_if_different,
     deep_merge,
     ensure_dir,

@@ -1,8 +1,0 @@
-# For pip install -r scripts/client-sync/requirements.txt (run script directly)
-# For editable install use: pip install -e scripts/client-sync/
-pyyaml>=6.0
-tomli>=2.0
-tomli-w>=1.0
-rich>=13.0
-questionary>=2.0
-pytimeparse>=1.1

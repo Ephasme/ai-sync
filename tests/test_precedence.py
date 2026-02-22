@@ -1,6 +1,6 @@
 import pytest
 
-from sync_ai_configs.precedence import apply_overrides, parse_override
+from ai_sync.precedence import apply_overrides, parse_override
 
 
 def test_parse_override_string() -> None:

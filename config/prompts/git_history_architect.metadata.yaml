@@ -1,6 +1,0 @@
-slug: git-history-architect
-name: Git History Architect
-description: Analyzes a Git working tree’s staged and unstaged changes and turns them
-  into a linear, dependency-aware plan of atomic commits using Conventional Commits.
-  Helps developers clean up messy change sets by producing a commit plan report first
-  and, after confirmation, the exact git add/commit commands to execute it safely.

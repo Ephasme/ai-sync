@@ -1,7 +1,7 @@
 import pytest
 
-from sync_ai_configs.env_loader import interpolate_env_refs, resolve_env_refs_in_obj
-from sync_ai_configs.op_inject import parse_injected_env
+from ai_sync.env_loader import interpolate_env_refs, resolve_env_refs_in_obj
+from ai_sync.op_inject import parse_injected_env
 
 
 def test_interpolate_env_refs_supports_both_forms() -> None:
