@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Load shell rc for OP_ACCOUNT when run manually (LaunchAgent sources it)
+# Load OP_ACCOUNT from rc when run manually (LaunchAgent sources it). Don't source rc files—
+# they may contain shell-specific syntax that fails when run under bash.
 if [ -z "${OP_ACCOUNT:-}" ] && [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
-  exit() { :; }
-  [ -f ~/.zshrc ] && . ~/.zshrc 2>/dev/null || true
-  [ -f ~/.bashrc ] && . ~/.bashrc 2>/dev/null || true
-  unset -f exit
+  for rc in ~/.zshrc ~/.bashrc; do
+    [ -f "$rc" ] || continue
+    val="$(grep -E '^\s*export\s+OP_ACCOUNT=' "$rc" 2>/dev/null | head -1 | sed -E 's/.*OP_ACCOUNT=["'\'']([^"'\'']*)["'\''].*/\1/')"
+    if [ -n "$val" ]; then
+      export OP_ACCOUNT="$val"
+      break
+    fi
+  done
 fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
