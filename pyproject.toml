@@ -31,11 +31,10 @@ dependencies = [
     "tomli-w>=1.0",
     "rich>=13.0",
     "questionary>=2.0",
-    "pytimeparse>=1.1",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
+dev = ["pytest>=7.0", "pyright>=1.1.390"]
 
 [project.scripts]
 ai-sync = "ai_sync.cli:main"

@@ -10,7 +10,6 @@ from pathlib import Path
 from ai_sync.helpers import (
     deep_merge,
     ensure_dir,
-    parse_duration_seconds,
     write_content_if_different,
 )
 
@@ -69,11 +68,16 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
                 entry["oauth"] = {"enabled": True, "clientId": client_id, "clientSecret": client_secret}
                 if scopes:
                     entry["oauth"]["scopes"] = [str(s) for s in scopes]
-        if "timeout" in server and server.get("timeout") is not None:
+        if "timeout_seconds" in server and server.get("timeout_seconds") is not None:
             try:
-                entry["timeout"] = parse_duration_seconds(server["timeout"]) * 1000
-            except ValueError:
-                print(f"  Warning: Invalid timeout for server '{server_id}': {server['timeout']!r}")
+                sec = float(server["timeout_seconds"])
+                if sec < 0:
+                    raise ValueError
+                entry["timeout"] = int(sec * 1000)
+            except (TypeError, ValueError):
+                print(
+                    f"  Warning: Invalid timeout_seconds for server '{server_id}': {server['timeout_seconds']!r}"
+                )
         return entry
 
     def sync_mcp(self, servers: dict, secrets: dict, for_client: Callable[[dict, str], bool]) -> None:
@@ -97,14 +101,26 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
 
     def _build_client_config(self, settings: dict) -> dict:
         out: dict = {}
+        mode = settings.get("mode") or "normal"
+        if settings.get("experimental") or mode == "strict":
+            out.setdefault("experimental", {})
+            out["experimental"]["plan"] = True
         if settings.get("subagents", True):
             out.setdefault("experimental", {})
             out["experimental"]["enableAgents"] = True
-        mode_map = {"ask": "default", "ask-once": "auto_edit", "full-access": "yolo"}
+        mode_map = {"strict": "plan", "normal": "auto_edit", "yolo": "yolo"}
         out.setdefault("general", {})
-        out["general"]["defaultApprovalMode"] = mode_map.get(settings.get("mode", "ask"), "default")
+        out["general"]["defaultApprovalMode"] = mode_map.get(mode, "default")
         tools = settings.get("tools")
-        if isinstance(tools, dict) and "sandbox" in tools:
+        sandbox_override = None
+        if mode == "strict":
+            sandbox_override = True
+        elif mode in {"normal", "yolo"}:
+            sandbox_override = False
+        if sandbox_override is not None:
+            out.setdefault("tools", {})
+            out["tools"]["sandbox"] = sandbox_override
+        elif isinstance(tools, dict) and "sandbox" in tools:
             out.setdefault("tools", {})
             out["tools"]["sandbox"] = bool(tools["sandbox"])
         return out

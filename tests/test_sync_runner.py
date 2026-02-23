@@ -74,7 +74,7 @@ def _make_config_root(tmp_path: Path) -> Path:
         "servers:\n  srv:\n    method: stdio\n    command: npx\n    env:\n      TOKEN: \"$TOKEN\"\n",
         encoding="utf-8",
     )
-    (root / "config" / "client-settings" / "settings.yaml").write_text("mode: ask\n", encoding="utf-8")
+    (root / "config" / "client-settings" / "settings.yaml").write_text("mode: normal\n", encoding="utf-8")
     return root
 
 

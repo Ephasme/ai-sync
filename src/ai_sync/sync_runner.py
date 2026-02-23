@@ -15,6 +15,7 @@ from ai_sync.helpers import (
     copy_file_if_different,
     ensure_dir,
     extract_description,
+    validate_client_settings,
     sync_tree_if_different,
     to_kebab_case,
 )
@@ -128,6 +129,17 @@ def sync_client_config(config: RunConfig, display: Display) -> None:
     except (yaml.YAMLError, OSError) as exc:
         display.print(f"Failed to load {settings_path}: {exc}", style="warning")
         return
+    errors = validate_client_settings(settings)
+    if errors:
+        display.panel("\n".join(errors), title="Invalid Client Config", style="error")
+        return
+    mode = settings.get("mode") or "normal"
+    if mode == "yolo":
+        display.panel(
+            "mode=yolo grants full access (no sandbox, no approval prompts).",
+            title="Warning",
+            style="error",
+        )
     rows: list[tuple[str, ...]] = []
     for client in CLIENTS:
         client.sync_client_config(settings)

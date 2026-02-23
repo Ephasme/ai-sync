@@ -9,7 +9,6 @@ from pathlib import Path
 from ai_sync.helpers import (
     deep_merge,
     ensure_dir,
-    parse_duration_seconds,
     write_content_if_different,
 )
 
@@ -64,11 +63,16 @@ is_background: {"true" if meta.get("is_background", False) else "false"}
             entry["trust"] = True
         if server.get("description"):
             entry["description"] = str(server["description"])
-        if "timeout" in server and server.get("timeout") is not None:
+        if "timeout_seconds" in server and server.get("timeout_seconds") is not None:
             try:
-                entry["timeout"] = parse_duration_seconds(server["timeout"]) * 1000
-            except ValueError:
-                print(f"  Warning: Invalid timeout for server '{server_id}': {server['timeout']!r}")
+                sec = float(server["timeout_seconds"])
+                if sec < 0:
+                    raise ValueError
+                entry["timeout"] = int(sec * 1000)
+            except (TypeError, ValueError):
+                print(
+                    f"  Warning: Invalid timeout_seconds for server '{server_id}': {server['timeout_seconds']!r}"
+                )
         return entry
 
     def sync_mcp(self, servers: dict, secrets: dict, for_client: Callable[[dict, str], bool]) -> None:
@@ -86,7 +90,8 @@ is_background: {"true" if meta.get("is_background", False) else "false"}
             self._warn_plaintext_secrets(mcp_path)
 
     def _build_client_config(self, settings: dict) -> dict:
-        if settings.get("mode", "ask") == "full-access":
+        mode = settings.get("mode") or "normal"
+        if mode in {"normal", "yolo"}:
             return {"permissions": {"allow": ["Shell(*)", "Read(*)", "Write(*)", "WebFetch(*)", "Mcp(*:*)"], "deny": []}}
         return {"permissions": {"allow": [], "deny": []}}
 

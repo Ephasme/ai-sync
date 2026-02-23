@@ -11,7 +11,6 @@ from ai_sync.helpers import (
     copy_file_if_different,
     deep_merge,
     ensure_dir,
-    parse_duration_seconds,
     write_content_if_different,
 )
 
@@ -55,13 +54,18 @@ class CodexClient(Client):
                 table["env"] = env
         if server.get("description"):
             table["description"] = str(server["description"])
-        if "timeout" in server and server.get("timeout") is not None:
+        if "timeout_seconds" in server and server.get("timeout_seconds") is not None:
             try:
-                sec = parse_duration_seconds(server["timeout"])
-                table["startup_timeout_sec"] = sec
-                table["tool_timeout_sec"] = sec
-            except ValueError:
-                print(f"  Warning: Invalid timeout for server '{server_id}': {server['timeout']!r}")
+                sec = float(server["timeout_seconds"])
+                if sec < 0:
+                    raise ValueError
+                sec_value = int(sec) if sec.is_integer() else sec
+                table["startup_timeout_sec"] = sec_value
+                table["tool_timeout_sec"] = sec_value
+            except (TypeError, ValueError):
+                print(
+                    f"  Warning: Invalid timeout_seconds for server '{server_id}': {server['timeout_seconds']!r}"
+                )
         return table
 
     def sync_mcp(self, servers: dict, secrets: dict, for_client: Callable[[dict, str], bool]) -> None:
@@ -96,19 +100,22 @@ class CodexClient(Client):
 
     def _build_client_config(self, settings: dict) -> dict:
         out: dict = {}
-        if settings.get("suppress_unstable_features_warning", False):
+        if settings.get("experimental"):
             out["suppress_unstable_features_warning"] = True
         if settings.get("subagents", True):
             out.setdefault("features", {})
             out["features"]["multi_agent"] = True
             out["features"]["child_agents_md"] = True
-        mode = settings.get("mode", "ask")
-        if mode == "full-access":
+        mode = settings.get("mode") or "normal"
+        if mode == "yolo":
             out["approval_policy"] = "never"
             out["sandbox_mode"] = "danger-full-access"
-        elif mode == "ask-once":
+        elif mode == "normal":
             out["approval_policy"] = "untrusted"
-            out["sandbox_mode"] = "workspace-write"
+            out["sandbox_mode"] = "danger-full-access"
+        elif mode == "strict":
+            out["approval_policy"] = "on-request"
+            out["sandbox_mode"] = "read-only"
         else:
             out["approval_policy"] = "on-request"
             out["sandbox_mode"] = "workspace-write"

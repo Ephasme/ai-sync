@@ -198,7 +198,7 @@ servers:
     args: ["-y", "@modelcontextprotocol/server-xxx"]
     enabled: true
     clients: [codex, cursor, gemini]   # Optional; default: all
-    timeout: 60s                       # Optional; startup/tool timeout
+    timeout_seconds: 60               # Optional; startup/tool timeout (seconds)
     trust: true                        # Optional; Cursor/Gemini: auto-approve tools
 ```
 
@@ -270,29 +270,29 @@ Copy from `settings.example.yaml`. See that file for full schema.
 
 | Key | Values | Description |
 |-----|--------|-------------|
+| `experimental` | `true` \| `false` | Enable experimental/preview features; suppress experimental warnings where supported |
 | `subagents` | `true` \| `false` | Enable multi-agents, sub-agents, child-prompts, AGENTS.md |
-| `mode` | `ask` \| `ask-once` \| `full-access` | Approval / restriction mode |
-| `suppress_unstable_features_warning` | `true` \| `false` | Codex only. Suppress "Under-development features" warning |
+| `mode` | `strict` \| `normal` \| `yolo` | Approval / restriction mode (default: `normal`) |
 | `tools.sandbox` | `true` \| `false` | Gemini only. When false, allow MCP tools filesystem access (uvx, etc.) |
 
 ### Mode semantics
 
 | Mode | Meaning |
 |------|---------|
-| `ask` | Prompt for approval every time before acting |
-| `ask-once` | Auto-approve safe ops, prompt for risky ones (where supported) |
-| `full-access` | No approval prompts, no restrictions (YOLO) |
+| `strict` | Most restrictive: read-only where supported; approval required for actions |
+| `normal` | More permissive; allow reads/writes while still requiring approval for destructive actions where supported |
+| `yolo` | No approval prompts, no restrictions (full access) |
 
 ### Client mapping (from official docs)
 
 | Generic | Codex | Gemini | Cursor |
 |----------|-------|--------|--------|
 | **subagents: true** | `features.multi_agent`, `features.child_agents_md` | `experimental.enableAgents` | — |
-| **suppress_unstable_features_warning** | `suppress_unstable_features_warning` | — | — |
+| **experimental: true** | `suppress_unstable_features_warning` | `experimental.plan` | — |
 | **tools.sandbox: false** | — | `tools.sandbox` | — |
-| **mode: ask** | `approval_policy=on-request`, `sandbox_mode=workspace-write` | `general.defaultApprovalMode=default` | `permissions: {allow:[], deny:[]}` |
-| **mode: ask-once** | `approval_policy=untrusted`, `sandbox_mode=workspace-write` | `general.defaultApprovalMode=auto_edit` | same as `ask` |
-| **mode: full-access** | `approval_policy=never`, `sandbox_mode=danger-full-access` | `general.defaultApprovalMode=yolo` | `allow: [Shell(*), Read(*), Write(*), WebFetch(*), Mcp(*:*)]` |
+| **mode: strict** | `approval_policy=on-request`, `sandbox_mode=read-only` | `general.defaultApprovalMode=plan`, `tools.sandbox=true` | `permissions: {allow:[], deny:[]}` |
+| **mode: normal** | `approval_policy=untrusted`, `sandbox_mode=danger-full-access` | `general.defaultApprovalMode=auto_edit`, `tools.sandbox=false` | `allow: [Shell(*), Read(*), Write(*), WebFetch(*), Mcp(*:*)]` |
+| **mode: yolo** | `approval_policy=never`, `sandbox_mode=danger-full-access` | `general.defaultApprovalMode=yolo`, `tools.sandbox=false` | `allow: [Shell(*), Read(*), Write(*), WebFetch(*), Mcp(*:*)]` |
 
 ### Client targets
 

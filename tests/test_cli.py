@@ -34,7 +34,7 @@ def test_run_import_copies_repo(monkeypatch, tmp_path: Path) -> None:
     (repo / "skills" / "skill-one").mkdir(parents=True)
     (repo / "skills" / "skill-one" / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
     (repo / "mcp-servers.yaml").write_text("servers:\n  ok:\n    method: stdio\n    command: npx\n", encoding="utf-8")
-    (repo / "client-settings.yaml").write_text("mode: ask\n", encoding="utf-8")
+    (repo / "client-settings.yaml").write_text("mode: normal\n", encoding="utf-8")
     (repo / ".env.tpl").write_text("X=1\n", encoding="utf-8")
     monkeypatch.setattr(cli, "ensure_layout", lambda: tmp_path / "dest")
     args = argparse.Namespace(repo=str(repo))

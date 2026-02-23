@@ -36,7 +36,7 @@ def test_codex_sync_mcp_and_config(monkeypatch, tmp_path: Path) -> None:
     assert mcp_env.exists()
     assert "export TOKEN=" in mcp_env.read_text(encoding="utf-8")
 
-    client.sync_client_config({"mode": "full-access", "subagents": True})
+    client.sync_client_config({"mode": "yolo", "subagents": True})
     data = tomllib.loads(config_path.read_text(encoding="utf-8"))
     assert data["approval_policy"] == "never"
     assert data["sandbox_mode"] == "danger-full-access"
@@ -52,7 +52,7 @@ def test_cursor_sync_mcp_and_config(monkeypatch, tmp_path: Path) -> None:
             "trust": True,
             "auth": {"token": "public"},
             "env": {"A": "B"},
-            "timeout": "1s",
+            "timeout_seconds": 1,
         }
     }
     secrets = {"servers": {"s1": {"auth": {"token": "secret"}}}}
@@ -61,7 +61,7 @@ def test_cursor_sync_mcp_and_config(monkeypatch, tmp_path: Path) -> None:
     data = json.loads(mcp_path.read_text(encoding="utf-8"))
     assert data["mcpServers"]["s1"]["url"] == "https://x"
     assert data["mcpServers"]["s1"]["auth"]["token"] == "secret"
-    client.sync_client_config({"mode": "full-access"})
+    client.sync_client_config({"mode": "yolo"})
     cfg = json.loads((tmp_path / ".cursor" / "cli-config.json").read_text(encoding="utf-8"))
     assert "Shell(*)" in cfg["permissions"]["allow"]
 

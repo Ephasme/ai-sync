@@ -7,7 +7,7 @@ def test_cursor_build_mcp_entry() -> None:
     client = CursorClient()
     entry = client._build_mcp_entry(
         "s",
-        {"method": "stdio", "command": "npx", "args": ["x"], "env": {"K": "V"}, "timeout": 1},
+        {"method": "stdio", "command": "npx", "args": ["x"], "env": {"K": "V"}, "timeout_seconds": 1},
         {"servers": {}},
     )
     assert entry["command"] == "npx"
