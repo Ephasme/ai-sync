@@ -9,10 +9,7 @@ from ai_sync.clients.codex import CodexClient
 from ai_sync.clients.cursor import CursorClient
 from ai_sync.clients.gemini import GeminiClient
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover
-    import tomli as tomllib
+import tomli as tomllib
 
 
 def test_codex_sync_mcp_and_config(monkeypatch, tmp_path: Path) -> None:

@@ -30,7 +30,16 @@ pipx install ai-sync
 ### Local development
 
 ```bash
-pip install -e ".[dev]"
+poetry sync --with dev
+```
+
+Optional (task runner):
+
+```bash
+brew install just
+just install
+just test
+just release 0.1.4
 ```
 
 ## Quick start
@@ -43,7 +52,7 @@ ai-sync sync
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.11+
 - [Codex](https://developers.openai.com/codex), [Cursor](https://cursor.com), and/or [Gemini CLI](https://geminicli.com) installed
 - 1Password Desktop app (for `OP_ACCOUNT`) or `OP_SERVICE_ACCOUNT_TOKEN` for service accounts
 - For MCP stdio servers: Node.js (`npx`), [uv](https://docs.astral.sh/uv/) (`uvx` for workspace-mcp), `pip install mcp-server-fetch` for fetch
@@ -306,10 +315,10 @@ Copy from `settings.example.yaml`. See that file for full schema.
 
 ## Dependencies
 
-The sync tool is packaged from the repo root:
+This project uses Poetry for dependency management and packaging:
 
 ```bash
-pip install -e .
+poetry sync --with dev
 ```
 
 Dependencies: `pyyaml>=6.0`, `tomli>=2.0`, `tomli-w>=1.0`, and others (see `pyproject.toml`).
@@ -317,8 +326,7 @@ Dependencies: `pyyaml>=6.0`, `tomli>=2.0`, `tomli-w>=1.0`, and others (see `pypr
 ### Testing
 
 ```bash
-pip install -e ".[dev]"
-pytest
+poetry run pytest
 ```
 
 ---
@@ -329,16 +337,16 @@ This project is published to PyPI as `ai-sync`.
 
 ### Release checklist
 
-1. Update version in `pyproject.toml`.
-2. Update README if anything changed in CLI behavior or setup.
-3. Tag and push:
+1. Update README if anything changed in CLI behavior or setup.
+2. Run the release:
 
 ```bash
-git tag vX.Y.Z
-git push origin vX.Y.Z
+just release X.Y.Z
 ```
 
-4. GitHub Actions runs tests, builds artifacts, publishes to PyPI, and creates a GitHub Release.
+This runs `./scripts/release_checks.sh`, `poetry lock`, bumps the version, runs tests, commits, tags, and pushes.
+
+3. GitHub Actions runs tests, builds artifacts, publishes to PyPI, and creates a GitHub Release.
 
 ### Notes
 
@@ -364,7 +372,7 @@ If you maintain a separate config repo for `ai-sync import`, consider ignoring:
 ### New machine setup
 
 1. Clone repo (tooling only)
-2. `pip install -e ".[dev]"`
+2. `poetry sync --with dev`
 3. `ai-sync setup --op-account NAME` (or set `OP_SERVICE_ACCOUNT_TOKEN`)
 4. `ai-sync import --repo /path/to/config-repo` (optional)
 5. Ensure `~/.ai-sync/.env.tpl` has correct 1Password refs

@@ -5,10 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - Python <3.11
-    import tomli as tomllib
+import tomli as tomllib
 
 import tomli_w
 

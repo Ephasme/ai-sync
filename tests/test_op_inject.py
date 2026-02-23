@@ -28,6 +28,7 @@ def test_resolve_auth_uses_account(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("OP_SERVICE_ACCOUNT_TOKEN", raising=False)
     monkeypatch.setenv("OP_ACCOUNT", "acc")
     auth = op_inject._resolve_auth(tmp_path)
+    assert isinstance(auth, op_inject.DesktopAuth)
     assert auth.account_name == "acc"
 
 

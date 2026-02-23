@@ -10,6 +10,7 @@ import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 from .config_store import DEFAULT_SECRET_PROVIDER, ensure_layout, get_config_root, load_config, write_config
 from .display import PlainDisplay, RichDisplay
@@ -18,7 +19,7 @@ from .sync_runner import run_sync
 
 
 @contextmanager
-def _resolve_repo_source(repo: str) -> Path:
+def _resolve_repo_source(repo: str) -> Iterator[Path]:
     repo_path = Path(repo).expanduser()
     if repo_path.exists():
         yield repo_path

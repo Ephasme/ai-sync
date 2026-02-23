@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence, cast
 
 import yaml
 
@@ -39,7 +40,7 @@ class RunConfig:
     source_mcp: Path
     source_client_config: Path
     source_env_template: Path
-    overrides: list[tuple[str, object]]
+    overrides: Sequence[tuple[str, object]]
     options: SyncOptions
 
 
@@ -155,7 +156,7 @@ def preflight(config: RunConfig, display: Display) -> dict:
         return manifest
     runtime_env = load_runtime_env_from_op(config.source_env_template, config.config_root)
     if runtime_env:
-        manifest = resolve_env_refs_in_obj(manifest, runtime_env)
+        manifest = cast(dict, resolve_env_refs_in_obj(manifest, runtime_env))
     return manifest
 
 
@@ -179,7 +180,7 @@ def run_sync(
     force: bool,
     no_interactive: bool,
     plain: bool,
-    overrides: list[tuple[str, object]],
+    overrides: Sequence[tuple[str, object]],
     display: Display,
 ) -> int:
     root = config_root or get_config_root()

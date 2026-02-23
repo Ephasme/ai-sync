@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Sequence
 
 FORBIDDEN_PTR_SEGMENT_RE = re.compile(r"auth|oauth|token|secret|password|api_key", re.IGNORECASE)
 
@@ -28,7 +29,7 @@ def _decode_pointer_segment(segment: str) -> str:
     return segment.replace("~1", "/").replace("~0", "~")
 
 
-def apply_overrides(document: dict, overrides: list[tuple[str, object]]) -> dict:
+def apply_overrides(document: dict, overrides: Sequence[tuple[str, object]]) -> dict:
     out = json.loads(json.dumps(document))
     for pointer, value in overrides:
         parts = [_decode_pointer_segment(p) for p in pointer.split("/")[1:]]
