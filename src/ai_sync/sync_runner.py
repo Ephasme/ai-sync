@@ -90,6 +90,9 @@ def sync_agents(config: RunConfig, display: Display) -> None:
 
 def sync_skills(config: RunConfig, display: Display) -> None:
     display.rule("Syncing Skills")
+    if not config.source_skills.exists():
+        display.print("No skills selected", style="dim")
+        return
     skill_dirs = sorted(d for d in config.source_skills.iterdir() if d.is_dir() and (d / "SKILL.md").exists())
     skill_dirs = [d for d in skill_dirs if d.name in config.options.skill_names]
     if not skill_dirs:
@@ -108,6 +111,8 @@ def sync_skills(config: RunConfig, display: Display) -> None:
             for sub in skill_dir.iterdir():
                 if sub.is_dir() and sub.name not in SKIP_PATTERNS:
                     sync_tree_if_different(sub, target_skill_dir / sub.name, SKIP_PATTERNS)
+                elif sub.is_file() and sub.name not in SKIP_PATTERNS and sub.name != "SKILL.md":
+                    copy_file_if_different(sub, target_skill_dir / sub.name)
     display.table(("Skill", "Slug", "Clients"), rows)
 
 
@@ -131,14 +136,14 @@ def sync_client_config(config: RunConfig, display: Display) -> None:
 
 
 def preflight(config: RunConfig, display: Display) -> dict:
-    runtime_env = load_runtime_env_from_op(config.source_env_template, config.config_root)
     manifest = load_manifest(config.source_mcp, display)
-    if runtime_env:
-        manifest = resolve_env_refs_in_obj(manifest, runtime_env)
     if config.overrides:
         manifest = apply_overrides(manifest, config.overrides)
-    if not config.source_prompts.exists() or not config.source_skills.exists():
-        raise RuntimeError("~/.ai-sync/config/prompts or ~/.ai-sync/config/skills directories not found")
+    if not manifest:
+        return manifest
+    runtime_env = load_runtime_env_from_op(config.source_env_template, config.config_root)
+    if runtime_env:
+        manifest = resolve_env_refs_in_obj(manifest, runtime_env)
     return manifest
 
 
@@ -194,9 +199,6 @@ def run_sync(
 
     agent_stems = sorted(p.stem for p in source_prompts.glob("*.md")) if source_prompts.exists() else []
     skill_names = sorted(d.name for d in source_skills.iterdir() if d.is_dir() and (d / "SKILL.md").exists()) if source_skills.exists() else []
-    if not agent_stems and not skill_names:
-        raise RuntimeError("No agents or skills found in config")
-
     if no_interactive or plain:
         options = SyncOptions(
             agent_stems=frozenset(agent_stems),

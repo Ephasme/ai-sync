@@ -137,7 +137,7 @@ def test_run_sync_force_writes_versions(monkeypatch, tmp_path: Path) -> None:
     assert versions_path.exists()
 
 
-def test_preflight_missing_dirs_raises(tmp_path: Path) -> None:
+def test_preflight_missing_dirs_noop(tmp_path: Path) -> None:
     root = tmp_path / "root"
     (root / "config" / "mcp-servers").mkdir(parents=True)
     display = FakeDisplay()
@@ -151,5 +151,31 @@ def test_preflight_missing_dirs_raises(tmp_path: Path) -> None:
         overrides=[],
         options=SyncOptions(agent_stems=frozenset(), skill_names=frozenset(), install_settings=True),
     )
-    with pytest.raises(RuntimeError):
-        sync_runner.preflight(config, display)
+    manifest = sync_runner.preflight(config, display)
+    assert manifest == {}
+
+
+def test_sync_skills_copies_root_files(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "root"
+    skill_root = root / "config" / "skills" / "skill-one"
+    skill_root.mkdir(parents=True)
+    (skill_root / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+    (skill_root / "reference.md").write_text("ref\n", encoding="utf-8")
+    display = FakeDisplay()
+    calls: list[str] = []
+    client = DummyClient("codex", tmp_path, calls)
+    monkeypatch.setattr(sync_runner, "CLIENTS", [client])
+
+    config = RunConfig(
+        config_root=root,
+        source_prompts=root / "config" / "prompts",
+        source_skills=root / "config" / "skills",
+        source_mcp=root / "config" / "mcp-servers",
+        source_client_config=root / "config" / "client-settings",
+        source_env_template=root / ".env.tpl",
+        overrides=[],
+        options=SyncOptions(agent_stems=frozenset(), skill_names=frozenset({"skill-one"}), install_settings=True),
+    )
+    sync_runner.sync_skills(config, display)
+    target = client.get_skills_dir() / "skill-one" / "reference.md"
+    assert target.exists()
