@@ -15,7 +15,7 @@ import yaml
 from .helpers import ensure_dir
 from .path_ops import delete_at_path, set_at_path
 from .state_store import StateStore
-from .track_write import DELETE, marker_bounds
+from .track_write import DELETE, _is_full_file_target, marker_bounds
 
 
 def run_uninstall(*, apply: bool) -> int:
@@ -53,6 +53,17 @@ def run_uninstall(*, apply: bool) -> int:
             for entry in file_entries:
                 marker_id = entry["target"]
                 baseline = entry.get("baseline", {})
+                if _is_full_file_target(marker_id):
+                    if baseline.get("exists"):
+                        any_baseline = True
+                        blob_id = baseline.get("blob_id")
+                        if isinstance(blob_id, str):
+                            blob = store.fetch_blob(blob_id)
+                            if blob is not None:
+                                content = blob
+                    else:
+                        content = ""
+                    continue
                 if baseline.get("exists"):
                     any_baseline = True
                     blob_id = baseline.get("blob_id")

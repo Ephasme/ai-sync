@@ -1,6 +1,6 @@
 import pytest
 
-from ai_sync.env_loader import interpolate_env_refs, resolve_env_refs_in_obj
+from ai_sync.env_loader import collect_env_refs, interpolate_env_refs, resolve_env_refs_in_obj
 from ai_sync.op_inject import parse_injected_env
 
 
@@ -27,3 +27,18 @@ def test_parse_injected_env() -> None:
 def test_parse_injected_env_rejects_invalid() -> None:
     with pytest.raises(RuntimeError):
         parse_injected_env("export A=1\n")
+
+
+def test_collect_env_refs_nested() -> None:
+    data = {
+        "servers": {
+            "a": {"env": {"KEY": "${API_KEY}"}},
+            "b": {"args": ["--token", "$TOKEN"]},
+            "c": {"static": "no-refs-here"},
+        }
+    }
+    assert collect_env_refs(data) == {"API_KEY", "TOKEN"}
+
+
+def test_collect_env_refs_empty_on_no_refs() -> None:
+    assert collect_env_refs({"x": 1, "y": [True, "plain"]}) == set()

@@ -28,7 +28,7 @@ def ensure_layout(config_root: Path | None = None) -> Path:
     (root / "config").mkdir(parents=True, exist_ok=True)
     (root / "config" / "prompts").mkdir(parents=True, exist_ok=True)
     (root / "config" / "skills").mkdir(parents=True, exist_ok=True)
-    (root / "config" / "rules").mkdir(parents=True, exist_ok=True)
+    (root / "config" / "commands").mkdir(parents=True, exist_ok=True)
     (root / "cache").mkdir(parents=True, exist_ok=True)
     return root
 

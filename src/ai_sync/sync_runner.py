@@ -12,7 +12,7 @@ import yaml
 
 from ai_sync.clients import CLIENTS
 from ai_sync.display import Display
-from ai_sync.env_loader import resolve_env_refs_in_obj
+from ai_sync.env_loader import collect_env_refs, resolve_env_refs_in_obj
 from ai_sync.helpers import (
     ensure_dir,
     extract_description,
@@ -39,7 +39,7 @@ class RunConfig:
     config_root: Path
     source_prompts: Path
     source_skills: Path
-    source_rules: Path
+    source_commands: Path
     source_mcp: Path
     source_client_config: Path
     source_env_template: Path
@@ -161,30 +161,30 @@ def sync_skills(config: RunConfig, display: Display) -> None:
     display.table(("Skill", "Slug", "Clients"), rows)
 
 
-def sync_rules(config: RunConfig, display: Display) -> None:
-    display.rule("Syncing Rules")
-    if not config.source_rules.exists():
-        display.print("No rules selected", style="dim")
+def sync_commands(config: RunConfig, display: Display) -> None:
+    display.rule("Syncing Commands")
+    if not config.source_commands.exists():
+        display.print("No commands selected", style="dim")
         return
-    rule_files = []
-    for rule_path in sorted(config.source_rules.rglob("*")):
-        if not rule_path.is_file():
+    command_files = []
+    for command_path in sorted(config.source_commands.rglob("*")):
+        if not command_path.is_file():
             continue
-        rel = rule_path.relative_to(config.source_rules)
+        rel = command_path.relative_to(config.source_commands)
         if any(part in SKIP_PATTERNS for part in rel.parts):
             continue
-        rule_files.append((rule_path, rel))
-    if not rule_files:
-        display.print("No rules selected", style="dim")
+        command_files.append((command_path, rel))
+    if not command_files:
+        display.print("No commands selected", style="dim")
         return
     rows: list[tuple[str, ...]] = []
-    for rule_path, rel in rule_files:
-        raw_content = rule_path.read_text(encoding="utf-8")
+    for command_path, rel in command_files:
+        raw_content = command_path.read_text(encoding="utf-8")
         slug = rel.as_posix()
         rows.append((slug, ", ".join(c.name for c in CLIENTS)))
         for client in CLIENTS:
-            client.write_rule(slug, raw_content, rel)
-    display.table(("Rule", "Clients"), rows)
+            client.write_command(slug, raw_content, rel)
+    display.table(("Command", "Clients"), rows)
 
 
 def _parse_structured_content(content: str, format: str) -> dict | list:
@@ -262,9 +262,23 @@ def preflight(config: RunConfig, display: Display) -> dict:
         manifest = apply_overrides(manifest, config.overrides)
     if not manifest:
         return manifest
-    runtime_env = load_runtime_env_from_op(config.source_env_template, config.config_root)
-    if runtime_env:
-        manifest = cast(dict, resolve_env_refs_in_obj(manifest, runtime_env))
+    required_vars = collect_env_refs(manifest)
+    if not required_vars:
+        return manifest
+    env_tpl = config.source_env_template
+    if not env_tpl.exists():
+        names = ", ".join(sorted(required_vars))
+        raise RuntimeError(
+            f"MCP config references env vars ({names}) but {env_tpl} is missing. "
+            "Create the file with the required variables (use op:// refs for 1Password secrets)."
+        )
+    runtime_env = load_runtime_env_from_op(env_tpl, config.config_root)
+    missing = sorted(required_vars - runtime_env.keys())
+    if missing:
+        raise RuntimeError(
+            f"MCP config references env vars not defined in {env_tpl}: {', '.join(missing)}"
+        )
+    manifest = cast(dict, resolve_env_refs_in_obj(manifest, runtime_env))
     return manifest
 
 
@@ -274,7 +288,7 @@ def execute(config: RunConfig, manifest: dict, display: Display) -> int:
     display.print(f"Source: {config.config_root}", style="info")
     sync_agents(config, display)
     sync_skills(config, display)
-    sync_rules(config, display)
+    sync_commands(config, display)
     sync_mcp_servers(manifest, display)
     if config.options.install_settings:
         sync_client_config(config, display)
@@ -315,7 +329,7 @@ def run_sync(
 
     source_prompts = root / "config" / "prompts"
     source_skills = root / "config" / "skills"
-    source_rules = root / "config" / "rules"
+    source_commands = root / "config" / "commands"
     source_mcp = root / "config"
     source_client_config = root / "config" / "client-settings.yaml"
     source_env_template = root / ".env.tpl"
@@ -338,7 +352,7 @@ def run_sync(
         config_root=root,
         source_prompts=source_prompts,
         source_skills=source_skills,
-        source_rules=source_rules,
+        source_commands=source_commands,
         source_mcp=source_mcp,
         source_client_config=source_client_config,
         source_env_template=source_env_template,

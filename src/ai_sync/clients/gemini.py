@@ -43,18 +43,18 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
             ]
         )
 
-    def write_rule(self, slug: str, raw_content: str, rule_src_path: Path) -> None:
-        if rule_src_path.suffix == ".mdc":
+    def write_command(self, slug: str, raw_content: str, command_src_path: Path) -> None:
+        if command_src_path.suffix == ".mdc":
             target_dir = self.config_dir / "rules"
         else:
             target_dir = self.config_dir / "commands"
-        target_path = target_dir / rule_src_path
+        target_path = target_dir / command_src_path
         track_write_blocks(
             [
                 WriteSpec(
                     file_path=target_path,
                     format="text",
-                    target=f"ai-sync:rule:{slug}",
+                    target=f"ai-sync:command:{slug}",
                     value=raw_content,
                 )
             ]

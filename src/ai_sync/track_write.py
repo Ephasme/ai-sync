@@ -65,6 +65,9 @@ def _apply_text_specs(file_path: Path, specs: list[WriteSpec], store: StateStore
         except OSError:
             content = ""
     original = content
+    if _should_use_full_file_text(specs):
+        _apply_full_file_text_specs(file_path, specs, store, original)
+        return
     for spec in specs:
         marker_id = spec.target
         entry = store.get_entry(file_path, "text", marker_id)
@@ -79,6 +82,40 @@ def _apply_text_specs(file_path: Path, specs: list[WriteSpec], store: StateStore
         else:
             block_body = str(spec.value)
             content = apply_marker_block(content, marker_id, block_body, file_path)
+
+    if content != original:
+        ensure_dir(file_path.parent)
+        _write_atomic(file_path, content)
+
+
+def _apply_full_file_text_specs(
+    file_path: Path,
+    specs: list[WriteSpec],
+    store: StateStore,
+    original: str,
+) -> None:
+    content = original
+    for spec in specs:
+        marker_id = spec.target
+        entry = store.get_entry(file_path, "text", marker_id)
+        if entry is None or not entry.get("baseline"):
+            if file_path.exists():
+                store.record_baseline(file_path, "text", marker_id, exists=True, content=original)
+            else:
+                store.record_baseline(file_path, "text", marker_id, exists=False, content=None)
+        if spec.value is DELETE:
+            entry = store.get_entry(file_path, "text", marker_id) or {}
+            baseline = entry.get("baseline", {}) if isinstance(entry, dict) else {}
+            if baseline.get("exists"):
+                blob_id = baseline.get("blob_id")
+                if isinstance(blob_id, str):
+                    restored = store.fetch_blob(blob_id)
+                    if restored is not None:
+                        content = restored
+                        continue
+            content = ""
+        else:
+            content = str(spec.value)
 
     if content != original:
         ensure_dir(file_path.parent)
@@ -125,10 +162,37 @@ def _apply_structured_specs(file_path: Path, specs: list[WriteSpec], store: Stat
 
 def apply_marker_block(content: str, marker_id: str, block_body: str, file_path: Path) -> str:
     begin, end = marker_bounds(file_path, marker_id)
+    style = _marker_style_for_path(file_path)
+    if style == "html":
+        frontmatter, body = _split_frontmatter(block_body)
+        if frontmatter is not None:
+            body = body.lstrip("\n")
+            block = f"{begin}\n{body.rstrip()}\n{end}"
+            pattern = re.compile(rf"{re.escape(begin)}.*?{re.escape(end)}", re.DOTALL)
+            if pattern.search(content):
+                replaced = pattern.sub(lambda _: block, content)
+                existing_front, rest = _split_frontmatter(replaced)
+                if existing_front is not None:
+                    rest = rest.lstrip("\n")
+                    combined = f"{frontmatter}\n\n{rest}" if rest else f"{frontmatter}\n"
+                    return combined if combined.endswith("\n") else combined + "\n"
+                combined = f"{frontmatter}\n\n{replaced.lstrip()}"
+                return combined if combined.endswith("\n") else combined + "\n"
+            if content.strip():
+                existing_front, rest = _split_frontmatter(content)
+                if existing_front is not None:
+                    rest = rest.lstrip("\n")
+                    combined = f"{frontmatter}\n\n{block}"
+                    if rest:
+                        combined = f"{combined}\n\n{rest.rstrip()}"
+                    return combined.rstrip() + "\n"
+                return content.rstrip() + "\n\n" + f"{frontmatter}\n\n{block}\n"
+            return f"{frontmatter}\n\n{block}\n"
+
     block = f"{begin}\n{block_body.rstrip()}\n{end}"
     pattern = re.compile(rf"{re.escape(begin)}.*?{re.escape(end)}", re.DOTALL)
     if pattern.search(content):
-        return pattern.sub(block, content)
+        return pattern.sub(lambda _: block, content)
     if content.strip():
         return content.rstrip() + "\n\n" + block + "\n"
     return block + "\n"
@@ -138,6 +202,8 @@ def remove_marker_block(content: str, marker_id: str, file_path: Path) -> str:
     begin, end = marker_bounds(file_path, marker_id)
     pattern = re.compile(rf"{re.escape(begin)}.*?{re.escape(end)}\n?", re.DOTALL)
     cleaned = pattern.sub("", content)
+    if _marker_style_for_path(file_path) == "html" and _is_frontmatter_only(cleaned):
+        return ""
     return cleaned.strip() + "\n" if cleaned.strip() else ""
 
 
@@ -146,6 +212,37 @@ def _extract_marker_block(content: str, marker_id: str, file_path: Path) -> str 
     pattern = re.compile(rf"{re.escape(begin)}.*?{re.escape(end)}", re.DOTALL)
     match = pattern.search(content)
     return match.group(0) if match else None
+
+
+def _split_frontmatter(content: str) -> tuple[str | None, str]:
+    if not content.startswith("---"):
+        return None, content
+    lines = content.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return None, content
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() in ("---", "..."):
+            front = "".join(lines[: idx + 1]).rstrip("\n")
+            rest = "".join(lines[idx + 1 :])
+            return front, rest
+    return None, content
+
+
+def _is_frontmatter_only(content: str) -> bool:
+    frontmatter, rest = _split_frontmatter(content)
+    if frontmatter is None:
+        return False
+    return not rest.strip()
+
+
+def _should_use_full_file_text(specs: list[WriteSpec]) -> bool:
+    if not specs:
+        return False
+    return all(_is_full_file_target(spec.target) for spec in specs)
+
+
+def _is_full_file_target(marker_id: str) -> bool:
+    return marker_id.startswith("ai-sync:agent:") or marker_id.startswith("ai-sync:skill:")
 
 
 def marker_bounds(file_path: Path, marker_id: str) -> tuple[str, str]:

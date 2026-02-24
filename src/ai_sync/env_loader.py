@@ -24,6 +24,25 @@ def interpolate_env_refs(value: str, env_map: dict[str, str]) -> str:
     return out
 
 
+def collect_env_refs(obj: object) -> set[str]:
+    """Return all ``${VAR}`` / ``$VAR`` names referenced in a nested structure."""
+    refs: set[str] = set()
+
+    def _walk(node: object) -> None:
+        if isinstance(node, dict):
+            for v in node.values():
+                _walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                _walk(v)
+        elif isinstance(node, str):
+            for m in ENV_REF_RE.finditer(node):
+                refs.add(m.group(1) or m.group(2) or "")
+
+    _walk(obj)
+    return refs
+
+
 def resolve_env_refs_in_obj(obj: object, env_map: dict[str, str]) -> object:
     if isinstance(obj, dict):
         return {k: resolve_env_refs_in_obj(v, env_map) for k, v in obj.items()}

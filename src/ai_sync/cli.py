@@ -40,7 +40,7 @@ def _resolve_repo_source(repo: str) -> Iterator[Path]:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Sync AI configs (agents, skills, rules, MCP servers) to Codex, Cursor, Gemini."
+        description="Sync AI configs (agents, skills, commands, MCP servers) to Codex, Cursor, Gemini."
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -123,7 +123,7 @@ def _run_import(args: argparse.Namespace) -> int:
         dest_config = root / "config"
         _copy_dir_if_exists(repo_root / "prompts", dest_config / "prompts")
         _copy_dir_if_exists(repo_root / "skills", dest_config / "skills")
-        _copy_dir_if_exists(repo_root / "rules", dest_config / "rules")
+        _copy_dir_if_exists(repo_root / "commands", dest_config / "commands")
         _copy_file_if_exists(repo_root / "mcp-servers.yaml", dest_config / "mcp-servers.yaml")
         _copy_file_if_exists(
             repo_root / "client-settings.yaml",

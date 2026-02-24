@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from ai_sync import sync_runner
+from ai_sync import mcp_sync, sync_runner
 from ai_sync.sync_runner import RunConfig, SyncOptions
 
 
@@ -48,9 +48,9 @@ class DummyClient:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(raw_content, encoding="utf-8")
 
-    def write_rule(self, slug: str, raw_content: str, rule_src_path: Path) -> None:
-        self.calls.append(f"write_rule:{self.name}:{slug}")
-        target = self.config_dir / "commands" / rule_src_path
+    def write_command(self, slug: str, raw_content: str, command_src_path: Path) -> None:
+        self.calls.append(f"write_command:{self.name}:{slug}")
+        target = self.config_dir / "commands" / command_src_path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(raw_content, encoding="utf-8")
 
@@ -71,11 +71,11 @@ def _make_config_root(tmp_path: Path) -> Path:
     root = tmp_path / "root"
     (root / "config" / "prompts").mkdir(parents=True)
     (root / "config" / "skills" / "skill-one").mkdir(parents=True)
-    (root / "config" / "rules").mkdir(parents=True)
+    (root / "config" / "commands").mkdir(parents=True)
     (root / ".env.tpl").write_text("TOKEN=abc\n", encoding="utf-8")
     (root / "config" / "prompts" / "agent.md").write_text("## Task\nDo thing\n", encoding="utf-8")
     (root / "config" / "skills" / "skill-one" / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
-    (root / "config" / "rules" / "shortcut.md").write_text("Do a thing\n", encoding="utf-8")
+    (root / "config" / "commands" / "shortcut.md").write_text("Do a thing\n", encoding="utf-8")
     (root / "config" / "mcp-servers.yaml").write_text(
         "servers:\n  srv:\n    method: stdio\n    command: npx\n    env:\n      TOKEN: \"$TOKEN\"\n",
         encoding="utf-8",
@@ -92,7 +92,7 @@ def test_preflight_resolves_env_and_overrides(tmp_path: Path) -> None:
         config_root=root,
         source_prompts=root / "config" / "prompts",
         source_skills=root / "config" / "skills",
-        source_rules=root / "config" / "rules",
+        source_commands=root / "config" / "commands",
         source_mcp=root / "config",
         source_client_config=root / "config" / "client-settings.yaml",
         source_env_template=root / ".env.tpl",
@@ -108,7 +108,9 @@ def test_run_sync_warns_on_version_mismatch(monkeypatch, tmp_path: Path) -> None
     root = _make_config_root(tmp_path)
     display = FakeDisplay()
     calls: list[str] = []
-    monkeypatch.setattr(sync_runner, "CLIENTS", [DummyClient("codex", tmp_path, calls)])
+    dummy_clients = [DummyClient("codex", tmp_path, calls)]
+    monkeypatch.setattr(sync_runner, "CLIENTS", dummy_clients)
+    monkeypatch.setattr(mcp_sync, "CLIENTS", dummy_clients)
     monkeypatch.setattr(sync_runner, "get_default_versions_path", lambda: tmp_path / "versions.json")
     monkeypatch.setattr(sync_runner, "check_client_versions", lambda _: (True, "Version mismatch: codex expected 1.2.x got 1.3.0"))
     result = sync_runner.run_sync(
@@ -129,7 +131,9 @@ def test_run_sync_force_writes_versions(monkeypatch, tmp_path: Path) -> None:
     display = FakeDisplay()
     calls: list[str] = []
     versions_path = tmp_path / "versions.json"
-    monkeypatch.setattr(sync_runner, "CLIENTS", [DummyClient("codex", tmp_path, calls)])
+    dummy_clients = [DummyClient("codex", tmp_path, calls)]
+    monkeypatch.setattr(sync_runner, "CLIENTS", dummy_clients)
+    monkeypatch.setattr(mcp_sync, "CLIENTS", dummy_clients)
     monkeypatch.setattr(sync_runner, "get_default_versions_path", lambda: versions_path)
     monkeypatch.setattr(sync_runner, "detect_client_versions", lambda: {"codex": "1.2.3"})
     result = sync_runner.run_sync(
@@ -152,7 +156,7 @@ def test_preflight_missing_dirs_noop(tmp_path: Path) -> None:
         config_root=root,
         source_prompts=root / "config" / "prompts",
         source_skills=root / "config" / "skills",
-        source_rules=root / "config" / "rules",
+        source_commands=root / "config" / "commands",
         source_mcp=root / "config",
         source_client_config=root / "config" / "client-settings.yaml",
         source_env_template=root / ".env.tpl",
@@ -179,7 +183,7 @@ def test_sync_skills_copies_root_files(tmp_path: Path, monkeypatch) -> None:
         config_root=root,
         source_prompts=root / "config" / "prompts",
         source_skills=root / "config" / "skills",
-        source_rules=root / "config" / "rules",
+        source_commands=root / "config" / "commands",
         source_mcp=root / "config",
         source_client_config=root / "config" / "client-settings.yaml",
         source_env_template=root / ".env.tpl",
@@ -191,11 +195,58 @@ def test_sync_skills_copies_root_files(tmp_path: Path, monkeypatch) -> None:
     assert target.exists()
 
 
-def test_sync_rules_copies_files(tmp_path: Path, monkeypatch) -> None:
+def test_preflight_fails_when_env_tpl_missing(tmp_path: Path) -> None:
     root = tmp_path / "root"
-    rules_root = root / "config" / "rules"
-    rules_root.mkdir(parents=True)
-    (rules_root / "shortcut.md").write_text("Do a thing\n", encoding="utf-8")
+    (root / "config").mkdir(parents=True)
+    (root / "config" / "mcp-servers.yaml").write_text(
+        "servers:\n  s:\n    method: stdio\n    command: npx\n    env:\n      KEY: \"${API_KEY}\"\n",
+        encoding="utf-8",
+    )
+    display = FakeDisplay()
+    config = RunConfig(
+        config_root=root,
+        source_prompts=root / "config" / "prompts",
+        source_skills=root / "config" / "skills",
+        source_commands=root / "config" / "commands",
+        source_mcp=root / "config",
+        source_client_config=root / "config" / "client-settings.yaml",
+        source_env_template=root / ".env.tpl",
+        overrides=[],
+        options=SyncOptions(agent_stems=frozenset(), skill_names=frozenset(), install_settings=True),
+    )
+    with pytest.raises(RuntimeError, match="missing"):
+        sync_runner.preflight(config, display)
+
+
+def test_preflight_fails_when_env_var_missing_from_tpl(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    (root / "config").mkdir(parents=True)
+    (root / "config" / "mcp-servers.yaml").write_text(
+        "servers:\n  s:\n    method: stdio\n    command: npx\n    env:\n      A: \"${VAR_A}\"\n      B: \"${VAR_B}\"\n",
+        encoding="utf-8",
+    )
+    (root / ".env.tpl").write_text("VAR_A=value_a\n", encoding="utf-8")
+    display = FakeDisplay()
+    config = RunConfig(
+        config_root=root,
+        source_prompts=root / "config" / "prompts",
+        source_skills=root / "config" / "skills",
+        source_commands=root / "config" / "commands",
+        source_mcp=root / "config",
+        source_client_config=root / "config" / "client-settings.yaml",
+        source_env_template=root / ".env.tpl",
+        overrides=[],
+        options=SyncOptions(agent_stems=frozenset(), skill_names=frozenset(), install_settings=True),
+    )
+    with pytest.raises(RuntimeError, match="VAR_B"):
+        sync_runner.preflight(config, display)
+
+
+def test_sync_commands_copies_files(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "root"
+    commands_root = root / "config" / "commands"
+    commands_root.mkdir(parents=True)
+    (commands_root / "shortcut.md").write_text("Do a thing\n", encoding="utf-8")
     monkeypatch.setenv("HOME", str(tmp_path))
     display = FakeDisplay()
     calls: list[str] = []
@@ -206,14 +257,14 @@ def test_sync_rules_copies_files(tmp_path: Path, monkeypatch) -> None:
         config_root=root,
         source_prompts=root / "config" / "prompts",
         source_skills=root / "config" / "skills",
-        source_rules=rules_root,
+        source_commands=commands_root,
         source_mcp=root / "config",
         source_client_config=root / "config" / "client-settings.yaml",
         source_env_template=root / ".env.tpl",
         overrides=[],
         options=SyncOptions(agent_stems=frozenset(), skill_names=frozenset(), install_settings=True),
     )
-    sync_runner.sync_rules(config, display)
+    sync_runner.sync_commands(config, display)
     target = client.config_dir / "commands" / "shortcut.md"
     assert target.exists()
-    assert "write_rule:codex:shortcut.md" in calls
+    assert "write_command:codex:shortcut.md" in calls

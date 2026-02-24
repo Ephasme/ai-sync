@@ -91,7 +91,7 @@ class Client(ABC):
         ...
 
     @abstractmethod
-    def write_rule(self, slug: str, raw_content: str, rule_src_path: Path) -> None:
+    def write_command(self, slug: str, raw_content: str, command_src_path: Path) -> None:
         ...
 
     @abstractmethod

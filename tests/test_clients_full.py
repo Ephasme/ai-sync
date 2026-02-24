@@ -141,44 +141,44 @@ def test_gemini_write_agent(monkeypatch, tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# write_rule
+# write_command
 # ---------------------------------------------------------------------------
 
 
-def test_cursor_write_rule_command(monkeypatch, tmp_path: Path) -> None:
+def test_cursor_write_command(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     client = CursorClient()
-    client.write_rule("shortcut.md", "Run command", Path("shortcut.md"))
-    rule_path = tmp_path / ".cursor" / "commands" / "shortcut.md"
-    assert rule_path.exists()
-    assert "Run command" in rule_path.read_text(encoding="utf-8")
+    client.write_command("shortcut.md", "Run command", Path("shortcut.md"))
+    cmd_path = tmp_path / ".cursor" / "commands" / "shortcut.md"
+    assert cmd_path.exists()
+    assert "Run command" in cmd_path.read_text(encoding="utf-8")
 
 
-def test_cursor_write_rule_mdc(monkeypatch, tmp_path: Path) -> None:
+def test_cursor_write_command_mdc(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     client = CursorClient()
-    client.write_rule("guide.mdc", "Guide content", Path("guide.mdc"))
-    rule_path = tmp_path / ".cursor" / "rules" / "guide.mdc"
-    assert rule_path.exists()
-    assert "Guide content" in rule_path.read_text(encoding="utf-8")
+    client.write_command("guide.mdc", "Guide content", Path("guide.mdc"))
+    cmd_path = tmp_path / ".cursor" / "rules" / "guide.mdc"
+    assert cmd_path.exists()
+    assert "Guide content" in cmd_path.read_text(encoding="utf-8")
 
 
-def test_codex_write_rule_command(monkeypatch, tmp_path: Path) -> None:
+def test_codex_write_command(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     client = CodexClient()
-    client.write_rule("shortcut.md", "Run command", Path("shortcut.md"))
-    rule_path = tmp_path / ".codex" / "commands" / "shortcut.md"
-    assert rule_path.exists()
-    assert "Run command" in rule_path.read_text(encoding="utf-8")
+    client.write_command("shortcut.md", "Run command", Path("shortcut.md"))
+    cmd_path = tmp_path / ".codex" / "commands" / "shortcut.md"
+    assert cmd_path.exists()
+    assert "Run command" in cmd_path.read_text(encoding="utf-8")
 
 
-def test_gemini_write_rule_command(monkeypatch, tmp_path: Path) -> None:
+def test_gemini_write_command(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     client = GeminiClient()
-    client.write_rule("shortcut.md", "Run command", Path("shortcut.md"))
-    rule_path = tmp_path / ".gemini" / "commands" / "shortcut.md"
-    assert rule_path.exists()
-    assert "Run command" in rule_path.read_text(encoding="utf-8")
+    client.write_command("shortcut.md", "Run command", Path("shortcut.md"))
+    cmd_path = tmp_path / ".gemini" / "commands" / "shortcut.md"
+    assert cmd_path.exists()
+    assert "Run command" in cmd_path.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
