@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "ai-sync"
-version = "0.1.7"
+version = "0.1.8"
 description = "Self-contained AI config sync for Codex, Cursor, and Gemini."
 readme = "README.md"
 authors = ["Loup Peluso <loup.peluso@gmail.com>"]
