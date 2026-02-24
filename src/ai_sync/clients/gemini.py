@@ -79,16 +79,25 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
             entry["trust"] = True
         if server.get("description"):
             entry["description"] = str(server["description"])
-        if server.get("oauth", {}).get("enabled"):
+        oauth_cfg = server.get("oauth", {})
+        if oauth_cfg.get("enabled") or oauth_cfg.get("authorizationUrl"):
             oauth_src = secret_srv.get("oauth") or secret_srv.get("auth") or server.get("oauth") or server.get("auth") or {}
-            oauth_cfg = server.get("oauth", {})
             client_id = (oauth_src.get("clientId") or "").strip()
             client_secret = (oauth_src.get("clientSecret") or "").strip()
             scopes = oauth_cfg.get("scopes") or oauth_src.get("scopes") or []
+            oauth_entry: dict = {}
+            if oauth_cfg.get("enabled"):
+                oauth_entry["enabled"] = True
             if client_id:
-                entry["oauth"] = {"enabled": True, "clientId": client_id, "clientSecret": client_secret}
-                if scopes:
-                    entry["oauth"]["scopes"] = [str(s) for s in scopes]
+                oauth_entry["clientId"] = client_id
+                oauth_entry["clientSecret"] = client_secret
+            for key in ("authorizationUrl", "tokenUrl", "issuer", "redirectUri"):
+                val = oauth_cfg.get(key) or oauth_src.get(key)
+                if val:
+                    oauth_entry[key] = str(val)
+            if scopes:
+                oauth_entry["scopes"] = [str(s) for s in scopes]
+            entry["oauth"] = oauth_entry
         if "timeout_seconds" in server and server.get("timeout_seconds") is not None:
             try:
                 sec = float(server["timeout_seconds"])
@@ -145,7 +154,7 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
         if settings.get("subagents", True):
             out.setdefault("experimental", {})
             out["experimental"]["enableAgents"] = True
-        mode_map = {"strict": "plan", "normal": "auto_edit", "yolo": "yolo"}
+        mode_map = {"strict": "plan", "normal": "auto_edit", "yolo": "auto_edit"}
         out.setdefault("general", {})
         out["general"]["defaultApprovalMode"] = mode_map.get(mode, "default")
         tools = settings.get("tools")
@@ -209,6 +218,18 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
             )
         if specs:
             track_write_blocks(specs, store)
+
+    def post_apply(self) -> None:
+        trusted_path = Path.home() / ".gemini" / "trustedFolders.json"
+        project_key = str(self._project_root)
+        data = self._read_json_config(trusted_path)
+
+        if data.get(project_key) == "TRUST_FOLDER":
+            return
+
+        data[project_key] = "TRUST_FOLDER"
+        trusted_path.parent.mkdir(parents=True, exist_ok=True)
+        trusted_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
     def sync_instructions(self, instructions_content: str, store: StateStore) -> None:
         if not instructions_content.strip():

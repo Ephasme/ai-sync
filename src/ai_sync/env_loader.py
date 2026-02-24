@@ -5,9 +5,12 @@ from __future__ import annotations
 import re
 
 ENV_REF_RE = re.compile(r"\$(\w+)|\$\{([^}]+)\}")
+_ESCAPE_SENTINEL = "\x00"
 
 
 def interpolate_env_refs(value: str, env_map: dict[str, str]) -> str:
+    escaped = value.replace("$$", _ESCAPE_SENTINEL)
+
     missing: list[str] = []
 
     def repl(match: re.Match[str]) -> str:
@@ -17,11 +20,11 @@ def interpolate_env_refs(value: str, env_map: dict[str, str]) -> str:
         missing.append(name)
         return match.group(0)
 
-    out = ENV_REF_RE.sub(repl, value)
+    out = ENV_REF_RE.sub(repl, escaped)
     if missing:
         names = ", ".join(sorted(set(missing)))
         raise RuntimeError(f"Missing environment values in injected env for: {names}")
-    return out
+    return out.replace(_ESCAPE_SENTINEL, "$")
 
 
 def collect_env_refs(obj: object) -> set[str]:
@@ -36,7 +39,8 @@ def collect_env_refs(obj: object) -> set[str]:
             for v in node:
                 _walk(v)
         elif isinstance(node, str):
-            for m in ENV_REF_RE.finditer(node):
+            cleaned = node.replace("$$", "")
+            for m in ENV_REF_RE.finditer(cleaned):
                 refs.add(m.group(1) or m.group(2) or "")
 
     _walk(obj)

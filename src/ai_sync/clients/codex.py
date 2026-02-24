@@ -92,6 +92,26 @@ class CodexClient(Client):
                 table["env"] = env
         if server.get("description"):
             table["description"] = str(server["description"])
+        oauth_cfg = server.get("oauth", {})
+        if oauth_cfg.get("enabled") or oauth_cfg.get("authorizationUrl"):
+            oauth_src = secret_srv.get("oauth") or secret_srv.get("auth") or server.get("oauth") or server.get("auth") or {}
+            client_id = (oauth_src.get("clientId") or "").strip()
+            client_secret = (oauth_src.get("clientSecret") or "").strip()
+            scopes = oauth_cfg.get("scopes") or oauth_src.get("scopes") or []
+            oauth_entry: dict = {}
+            if oauth_cfg.get("enabled"):
+                oauth_entry["enabled"] = True
+            if client_id:
+                oauth_entry["clientId"] = client_id
+                oauth_entry["clientSecret"] = client_secret
+            for key in ("authorizationUrl", "tokenUrl", "issuer", "redirectUri"):
+                val = oauth_cfg.get(key) or oauth_src.get(key)
+                if val:
+                    oauth_entry[key] = str(val)
+            if scopes:
+                oauth_entry["scopes"] = [str(s) for s in scopes]
+            if oauth_entry:
+                table["oauth"] = oauth_entry
         if "timeout_seconds" in server and server.get("timeout_seconds") is not None:
             try:
                 sec = float(server["timeout_seconds"])

@@ -20,6 +20,7 @@ def test_cursor_build_mcp_entry() -> None:
     assert entry["command"] == "npx"
     assert entry["env"]["K"] == "V"
     assert entry["timeout"] == 1000
+    assert entry["disabled"] is False
 
 
 def test_codex_build_mcp_entry_http() -> None:
