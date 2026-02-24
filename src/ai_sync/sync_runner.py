@@ -76,7 +76,7 @@ def sync_agents(config: RunConfig, display: Display) -> None:
     if not prompts:
         display.print("No agents selected", style="dim")
         return
-    if not (config.source_client_config / "settings.yaml").exists():
+    if not config.source_client_config.exists():
         gemini = next((c for c in CLIENTS if c.name == "gemini"), None)
         if gemini:
             gemini.enable_subagents_fallback()
@@ -200,9 +200,9 @@ def _flatten_structured_to_specs(file_path: Path, format: str, data: object) -> 
 
 
 def sync_client_config(config: RunConfig, display: Display) -> None:
-    settings_path = config.source_client_config / "settings.yaml"
+    settings_path = config.source_client_config
     if not settings_path.exists():
-        display.print("Client Config: skipping (~/.ai-sync/config/client-settings/settings.yaml not found)", style="dim")
+        display.print("Client Config: skipping (~/.ai-sync/config/client-settings.yaml not found)", style="dim")
         return
     display.rule("Syncing Client Config")
     try:
@@ -287,8 +287,8 @@ def run_sync(
 
     source_prompts = root / "config" / "prompts"
     source_skills = root / "config" / "skills"
-    source_mcp = root / "config" / "mcp-servers"
-    source_client_config = root / "config" / "client-settings"
+    source_mcp = root / "config"
+    source_client_config = root / "config" / "client-settings.yaml"
     source_env_template = root / ".env.tpl"
 
     agent_stems = sorted(p.stem for p in source_prompts.glob("*.md")) if source_prompts.exists() else []

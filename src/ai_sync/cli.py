@@ -124,10 +124,10 @@ def _run_import(args: argparse.Namespace) -> int:
         _copy_dir_if_exists(repo_root / "prompts", dest_config / "prompts")
         _copy_dir_if_exists(repo_root / "skills", dest_config / "skills")
         _copy_dir_if_exists(repo_root / "rules", dest_config / "rules")
-        _copy_file_if_exists(repo_root / "mcp-servers.yaml", dest_config / "mcp-servers" / "servers.yaml")
+        _copy_file_if_exists(repo_root / "mcp-servers.yaml", dest_config / "mcp-servers.yaml")
         _copy_file_if_exists(
             repo_root / "client-settings.yaml",
-            dest_config / "client-settings" / "settings.yaml",
+            dest_config / "client-settings.yaml",
         )
         _copy_file_if_exists(repo_root / ".env.tpl", root / ".env.tpl")
     if not config_path.exists():
@@ -202,8 +202,8 @@ def _run_doctor() -> int:
     required_dirs = [
         root / "config" / "prompts",
         root / "config" / "skills",
-        root / "config" / "mcp-servers",
-        root / "config" / "client-settings",
+        root / "config" / "mcp-servers.yaml",
+        root / "config" / "client-settings.yaml",
     ]
     for path in required_dirs:
         status = "OK" if path.exists() else "missing"

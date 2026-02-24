@@ -13,7 +13,7 @@ from .models import MCPManifest
 
 
 def load_manifest(mcp_root: Path, display: Display) -> dict:
-    servers_path = mcp_root / "servers.yaml"
+    servers_path = mcp_root / "mcp-servers.yaml"
     if not servers_path.exists():
         return {}
     try:
@@ -24,7 +24,7 @@ def load_manifest(mcp_root: Path, display: Display) -> dict:
         return {}
     errors = validate_servers_yaml(data)
     for err in errors:
-        display.print(f"servers.yaml: {err}", style="warning")
+        display.print(f"mcp-servers.yaml: {err}", style="warning")
     try:
         model = MCPManifest.model_validate(data)
     except ValidationError as exc:

@@ -47,7 +47,7 @@ def run_interactive_prompts(
 
     display.print("")
     display.panel("", title="Sync options", style="info")
-    install_settings = questionary.confirm("Install client settings (settings.yaml)?", default=True).ask()
+    install_settings = questionary.confirm("Install client settings (client-settings.yaml)?", default=True).ask()
     if install_settings is None:
         return None
 

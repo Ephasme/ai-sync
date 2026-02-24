@@ -41,8 +41,8 @@ def test_run_import_copies_repo(monkeypatch, tmp_path: Path) -> None:
     assert cli._run_import(args) == 0
     assert (tmp_path / "dest" / "config" / "prompts" / "agent.md").exists()
     assert (tmp_path / "dest" / "config" / "skills" / "skill-one" / "SKILL.md").exists()
-    assert (tmp_path / "dest" / "config" / "mcp-servers" / "servers.yaml").exists()
-    assert (tmp_path / "dest" / "config" / "client-settings" / "settings.yaml").exists()
+    assert (tmp_path / "dest" / "config" / "mcp-servers.yaml").exists()
+    assert (tmp_path / "dest" / "config" / "client-settings.yaml").exists()
     assert (tmp_path / "dest" / ".env.tpl").exists()
 
 
@@ -55,8 +55,10 @@ def test_run_doctor_ok(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(cli, "get_config_root", lambda: tmp_path)
     (tmp_path / "config.toml").write_text("op_account = \"X\"\n", encoding="utf-8")
     (tmp_path / "config").mkdir()
-    for sub in ["prompts", "skills", "mcp-servers", "client-settings"]:
+    for sub in ["prompts", "skills"]:
         (tmp_path / "config" / sub).mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "mcp-servers.yaml").write_text("servers: {}\n", encoding="utf-8")
+    (tmp_path / "config" / "client-settings.yaml").write_text("mode: normal\n", encoding="utf-8")
     monkeypatch.setenv("OP_ACCOUNT", "X")
     assert cli._run_doctor() == 0
 

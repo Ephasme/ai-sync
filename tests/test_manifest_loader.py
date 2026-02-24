@@ -31,7 +31,7 @@ def test_load_manifest_missing_returns_empty(tmp_path: Path) -> None:
 
 def test_load_manifest_invalid_yaml_warns(tmp_path: Path) -> None:
     display = FakeDisplay()
-    (tmp_path / "servers.yaml").write_text("servers: [", encoding="utf-8")
+    (tmp_path / "mcp-servers.yaml").write_text("servers: [", encoding="utf-8")
     data = load_manifest(tmp_path, display)
     assert data == {}
     assert any("Failed to load" in msg for _, msg in display.messages)
@@ -39,14 +39,14 @@ def test_load_manifest_invalid_yaml_warns(tmp_path: Path) -> None:
 
 def test_load_manifest_validation_error_raises(tmp_path: Path) -> None:
     display = FakeDisplay()
-    (tmp_path / "servers.yaml").write_text("servers: 123\n", encoding="utf-8")
+    (tmp_path / "mcp-servers.yaml").write_text("servers: 123\n", encoding="utf-8")
     with pytest.raises(RuntimeError):
         load_manifest(tmp_path, display)
 
 
 def test_load_manifest_valid(tmp_path: Path) -> None:
     display = FakeDisplay()
-    (tmp_path / "servers.yaml").write_text(
+    (tmp_path / "mcp-servers.yaml").write_text(
         "servers:\n  ok:\n    method: stdio\n    command: npx\n",
         encoding="utf-8",
     )

@@ -1,4 +1,4 @@
-# AI Research Doc
+# ai-sync
 
 A self-contained local config store for **Codex**, **Cursor**, and **Gemini CLI**. Define agents, skills, MCP servers, and client settings once in `~/.ai-sync/`, then sync them to every client with one command.
 
@@ -80,8 +80,9 @@ Runtime:
 ├── config/
 │   ├── prompts/
 │   ├── skills/
-│   ├── mcp-servers/
-│   └── client-settings/
+│   ├── rules/
+│   ├── mcp-servers.yaml
+│   └── client-settings.yaml
 └── cache/
 ```
 
@@ -125,8 +126,8 @@ Other commands: `ai-sync setup`, `ai-sync import`, `ai-sync doctor`.
 
 1. **Agents** – From `~/.ai-sync/config/prompts/*.md` → `~/.codex/agents/`, `~/.cursor/agents/`, `~/.gemini/agents/`
 2. **Skills** – From `~/.ai-sync/config/skills/*/` → `~/.codex/skills/`, `~/.cursor/skills/`, `~/.gemini/skills/`
-3. **MCP servers** – From `~/.ai-sync/config/mcp-servers/servers.yaml` → client MCP configs, MCP instructions
-4. **Client config** – From `~/.ai-sync/config/client-settings/settings.yaml` → approval policy, sandbox, features
+3. **MCP servers** – From `~/.ai-sync/config/mcp-servers.yaml` → client MCP configs, MCP instructions
+4. **Client config** – From `~/.ai-sync/config/client-settings.yaml` → approval policy, sandbox, features
 
 ### Sync strategy
 
@@ -197,7 +198,7 @@ Paths containing `.venv`, `node_modules`, `__pycache__`, `.git`, or `.DS_Store` 
 
 ## MCP servers
 
-### Manifest (`~/.ai-sync/config/mcp-servers/servers.yaml`)
+### Manifest (`~/.ai-sync/config/mcp-servers.yaml`)
 
 ```yaml
 servers:
@@ -250,7 +251,7 @@ GOOGLE_OAUTH_CLIENT_ID_PERSO=op://Private/AI Tools Secrets/GOOGLE_OAUTH_CLIENT_I
 ...
 ```
 
-In `servers.yaml`, reference them with `"${VAR_NAME}"` in each server's `env` or `oauth` block. The sync script resolves these at runtime via 1Password (requires `OP_ACCOUNT` or `OP_SERVICE_ACCOUNT_TOKEN`).
+In `mcp-servers.yaml`, reference them with `"${VAR_NAME}"` in each server's `env` or `oauth` block. The sync script resolves these at runtime via 1Password (requires `OP_ACCOUNT` or `OP_SERVICE_ACCOUNT_TOKEN`).
 
 **Requirements**: 1Password Desktop app (for `OP_ACCOUNT`) or `OP_SERVICE_ACCOUNT_TOKEN` (service account).
 
@@ -273,9 +274,7 @@ OAuth tokens are stored per client (e.g. `~/.gemini/mcp-oauth-tokens.json`). To 
 
 Single YAML definition → derived into Codex, Gemini, and Cursor.
 
-### Schema (`~/.ai-sync/config/client-settings/settings.yaml`)
-
-Copy from `settings.example.yaml`. See that file for full schema.
+### Schema (`~/.ai-sync/config/client-settings.yaml`)
 
 | Key | Values | Description |
 |-----|--------|-------------|
@@ -359,8 +358,8 @@ This runs `./scripts/release_checks.sh`, `poetry lock`, bumps the version, runs 
 
 If you maintain a separate config repo for `ai-sync import`, consider ignoring:
 
-- `config/mcp-servers/servers.yaml` (copy from `servers.example.yaml`)
-- `config/client-settings/settings.yaml` (copy from `settings.example.yaml`)
+- `config/mcp-servers.yaml`
+- `config/client-settings.yaml`
 - `.env.tpl`
 - `knowledge-base/*`
 - `.env`, Python bytecode, virtual envs, `.pytest_cache/`, `node_modules/`, `.DS_Store`, etc.
@@ -381,7 +380,7 @@ If you maintain a separate config repo for `ai-sync import`, consider ignoring:
 
 ### Adding an MCP server
 
-1. Edit `~/.ai-sync/config/mcp-servers/servers.yaml`
+1. Edit `~/.ai-sync/config/mcp-servers.yaml`
 2. Add required vars to `~/.ai-sync/.env.tpl` (use `op://` refs for secrets)
 3. Run `ai-sync sync`
 
@@ -398,7 +397,7 @@ If you maintain a separate config repo for `ai-sync import`, consider ignoring:
 
 ### Changing client mode
 
-1. Edit `~/.ai-sync/config/client-settings/settings.yaml` (`subagents`, `mode`)
+1. Edit `~/.ai-sync/config/client-settings.yaml` (`subagents`, `mode`)
 2. Run `ai-sync sync`
 
 ---

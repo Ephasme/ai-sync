@@ -65,16 +65,14 @@ def _make_config_root(tmp_path: Path) -> Path:
     root = tmp_path / "root"
     (root / "config" / "prompts").mkdir(parents=True)
     (root / "config" / "skills" / "skill-one").mkdir(parents=True)
-    (root / "config" / "mcp-servers").mkdir(parents=True)
-    (root / "config" / "client-settings").mkdir(parents=True)
     (root / ".env.tpl").write_text("TOKEN=abc\n", encoding="utf-8")
     (root / "config" / "prompts" / "agent.md").write_text("## Task\nDo thing\n", encoding="utf-8")
     (root / "config" / "skills" / "skill-one" / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
-    (root / "config" / "mcp-servers" / "servers.yaml").write_text(
+    (root / "config" / "mcp-servers.yaml").write_text(
         "servers:\n  srv:\n    method: stdio\n    command: npx\n    env:\n      TOKEN: \"$TOKEN\"\n",
         encoding="utf-8",
     )
-    (root / "config" / "client-settings" / "settings.yaml").write_text("mode: normal\n", encoding="utf-8")
+    (root / "config" / "client-settings.yaml").write_text("mode: normal\n", encoding="utf-8")
     return root
 
 
@@ -86,8 +84,8 @@ def test_preflight_resolves_env_and_overrides(tmp_path: Path) -> None:
         config_root=root,
         source_prompts=root / "config" / "prompts",
         source_skills=root / "config" / "skills",
-        source_mcp=root / "config" / "mcp-servers",
-        source_client_config=root / "config" / "client-settings",
+        source_mcp=root / "config",
+        source_client_config=root / "config" / "client-settings.yaml",
         source_env_template=root / ".env.tpl",
         overrides=overrides,
         options=SyncOptions(agent_stems=frozenset({"agent"}), skill_names=frozenset({"skill-one"}), install_settings=True),
@@ -139,14 +137,14 @@ def test_run_sync_force_writes_versions(monkeypatch, tmp_path: Path) -> None:
 
 def test_preflight_missing_dirs_noop(tmp_path: Path) -> None:
     root = tmp_path / "root"
-    (root / "config" / "mcp-servers").mkdir(parents=True)
+    (root / "config").mkdir(parents=True)
     display = FakeDisplay()
     config = RunConfig(
         config_root=root,
         source_prompts=root / "config" / "prompts",
         source_skills=root / "config" / "skills",
-        source_mcp=root / "config" / "mcp-servers",
-        source_client_config=root / "config" / "client-settings",
+        source_mcp=root / "config",
+        source_client_config=root / "config" / "client-settings.yaml",
         source_env_template=root / ".env.tpl",
         overrides=[],
         options=SyncOptions(agent_stems=frozenset(), skill_names=frozenset(), install_settings=True),
@@ -171,8 +169,8 @@ def test_sync_skills_copies_root_files(tmp_path: Path, monkeypatch) -> None:
         config_root=root,
         source_prompts=root / "config" / "prompts",
         source_skills=root / "config" / "skills",
-        source_mcp=root / "config" / "mcp-servers",
-        source_client_config=root / "config" / "client-settings",
+        source_mcp=root / "config",
+        source_client_config=root / "config" / "client-settings.yaml",
         source_env_template=root / ".env.tpl",
         overrides=[],
         options=SyncOptions(agent_stems=frozenset(), skill_names=frozenset({"skill-one"}), install_settings=True),

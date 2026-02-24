@@ -141,7 +141,7 @@ def extract_description(content: str) -> str:
 def validate_servers_yaml(data: dict) -> list[str]:
     errors: list[str] = []
     if not isinstance(data, dict):
-        return ["servers.yaml root must be a mapping"]
+        return ["mcp-servers.yaml root must be a mapping"]
     servers = data.get("servers")
     if servers is not None and not isinstance(servers, dict):
         errors.append("'servers' must be a mapping")
