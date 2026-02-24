@@ -7,17 +7,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence, cast
 
+import tomli
 import yaml
 
 from ai_sync.clients import CLIENTS
 from ai_sync.display import Display
 from ai_sync.env_loader import resolve_env_refs_in_obj
 from ai_sync.helpers import (
-    copy_file_if_different,
     ensure_dir,
     extract_description,
     validate_client_settings,
-    sync_tree_if_different,
     to_kebab_case,
 )
 from ai_sync.interactive import SyncOptions, run_interactive_prompts
@@ -26,7 +25,10 @@ from ai_sync.mcp_sync import sync_mcp_servers
 from ai_sync.config_store import get_config_root
 from ai_sync.op_inject import load_runtime_env_from_op
 from ai_sync.precedence import apply_overrides
+from ai_sync.path_ops import escape_path_segment
 from ai_sync.version_checks import check_client_versions, detect_client_versions, get_default_versions_path
+from ai_sync.state_store import StateStore
+from ai_sync.track_write import DELETE, WriteSpec, track_write_blocks
 
 GENERIC_METADATA_KEYS = {"slug", "name", "description"}
 SKIP_PATTERNS = {".venv", "node_modules", "__pycache__", ".git", ".DS_Store"}
@@ -109,13 +111,92 @@ def sync_skills(config: RunConfig, display: Display) -> None:
             ensure_dir(target_base)
             target_skill_dir = target_base / kebab_name
             ensure_dir(target_skill_dir)
-            copy_file_if_different(skill_dir / "SKILL.md", target_skill_dir / "SKILL.md")
-            for sub in skill_dir.iterdir():
-                if sub.is_dir() and sub.name not in SKIP_PATTERNS:
-                    sync_tree_if_different(sub, target_skill_dir / sub.name, SKIP_PATTERNS)
-                elif sub.is_file() and sub.name not in SKIP_PATTERNS and sub.name != "SKILL.md":
-                    copy_file_if_different(sub, target_skill_dir / sub.name)
+            specs: list[WriteSpec] = []
+            store = StateStore()
+            store.load()
+            for sub in skill_dir.rglob("*"):
+                rel = sub.relative_to(skill_dir)
+                if any(part in SKIP_PATTERNS for part in rel.parts):
+                    continue
+                if sub.is_dir():
+                    continue
+                target = target_skill_dir / rel
+                if sub.name.endswith(".json"):
+                    format = "json"
+                elif sub.name.endswith(".toml"):
+                    format = "toml"
+                elif sub.name.endswith(".yaml") or sub.name.endswith(".yml"):
+                    format = "yaml"
+                else:
+                    format = "text"
+                content = sub.read_text(encoding="utf-8")
+                marker_id = f"ai-sync:skill:{kebab_name}:{rel.as_posix()}"
+                if format == "text":
+                    specs.append(
+                        WriteSpec(
+                            file_path=target,
+                            format=format,
+                            target=marker_id,
+                            value=content,
+                        )
+                    )
+                    continue
+                data = _parse_structured_content(content, format)
+                leaf_specs = _flatten_structured_to_specs(target, format, data)
+                existing_targets = set(store.list_targets(target, format, "/"))
+                current_targets = {spec.target for spec in leaf_specs}
+                for stale_target in sorted(existing_targets - current_targets):
+                    leaf_specs.append(
+                        WriteSpec(
+                            file_path=target,
+                            format=format,
+                            target=stale_target,
+                            value=DELETE,
+                        )
+                    )
+                specs.extend(leaf_specs)
+            if specs:
+                track_write_blocks(specs)
     display.table(("Skill", "Slug", "Clients"), rows)
+
+
+def _parse_structured_content(content: str, format: str) -> dict | list:
+    if not content.strip():
+        return {}
+    if format == "json":
+        return json.loads(content)
+    if format == "toml":
+        return tomli.loads(content)
+    if format == "yaml":
+        data = yaml.safe_load(content)
+        return data if isinstance(data, (dict, list)) else {}
+    raise ValueError(f"Unsupported format: {format}")
+
+
+def _flatten_structured_to_specs(file_path: Path, format: str, data: object) -> list[WriteSpec]:
+    specs: list[WriteSpec] = []
+
+    def walk(node: object, prefix: str) -> None:
+        if isinstance(node, dict):
+            if not node:
+                specs.append(WriteSpec(file_path=file_path, format=format, target=prefix or "/", value={}))
+                return
+            for key, value in node.items():
+                next_prefix = f"{prefix}/{escape_path_segment(str(key))}"
+                walk(value, next_prefix)
+            return
+        if isinstance(node, list):
+            specs.append(WriteSpec(file_path=file_path, format=format, target=prefix or "/", value=[]))
+            if not node:
+                return
+            for idx, value in enumerate(node):
+                next_prefix = f"{prefix}/{idx}"
+                walk(value, next_prefix)
+            return
+        specs.append(WriteSpec(file_path=file_path, format=format, target=prefix or "/", value=node))
+
+    walk(data, "")
+    return specs
 
 
 def sync_client_config(config: RunConfig, display: Display) -> None:

@@ -6,6 +6,8 @@ import json
 import re
 from typing import Sequence
 
+from .path_ops import split_path
+
 FORBIDDEN_PTR_SEGMENT_RE = re.compile(r"auth|oauth|token|secret|password|api_key", re.IGNORECASE)
 
 
@@ -25,14 +27,10 @@ def parse_override(item: str, *, parse_json: bool) -> tuple[str, object]:
     return pointer, raw_value
 
 
-def _decode_pointer_segment(segment: str) -> str:
-    return segment.replace("~1", "/").replace("~0", "~")
-
-
 def apply_overrides(document: dict, overrides: Sequence[tuple[str, object]]) -> dict:
     out = json.loads(json.dumps(document))
     for pointer, value in overrides:
-        parts = [_decode_pointer_segment(p) for p in pointer.split("/")[1:]]
+        parts = split_path(pointer)
         if not parts:
             raise RuntimeError("Root override is not allowed")
         cur: object = out

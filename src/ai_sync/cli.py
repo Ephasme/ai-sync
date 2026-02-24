@@ -16,6 +16,7 @@ from .config_store import DEFAULT_SECRET_PROVIDER, ensure_layout, get_config_roo
 from .display import PlainDisplay, RichDisplay
 from .precedence import parse_override
 from .sync_runner import run_sync
+from .uninstall import run_uninstall
 
 
 @contextmanager
@@ -63,6 +64,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     subparsers.add_parser("doctor", help="Check setup and 1Password auth configuration.")
+    uninstall_parser = subparsers.add_parser("uninstall", help="Remove ai-sync managed changes.")
+    uninstall_parser.add_argument("--apply", action="store_true", help="Apply uninstall (default is dry-run).")
 
     return parser
 
@@ -208,6 +211,14 @@ def _run_doctor() -> int:
     return 0
 
 
+def _run_uninstall(args: argparse.Namespace) -> int:
+    try:
+        return run_uninstall(apply=bool(args.apply))
+    except Exception as exc:
+        print(f"Uninstall failed: {exc}", file=sys.stderr)
+        return 1
+
+
 def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
@@ -220,6 +231,8 @@ def main() -> int:
         return _run_import(args)
     if args.command == "doctor":
         return _run_doctor()
+    if args.command == "uninstall":
+        return _run_uninstall(args)
     if args.command == "sync":
         return _run_sync(args)
 

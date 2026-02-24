@@ -13,8 +13,6 @@ import tomli
 import tomli_w
 
 class Client(ABC):
-    _MANAGED_MARKER = "_managed_by_sync_ai_configs"  # Migration: read from existing config when sidecar missing
-    _SIDECAR_NAME = ".sync_managed_mcp.json"
 
     @property
     @abstractmethod
@@ -75,43 +73,6 @@ class Client(ABC):
 
     def _get_secret_for_server(self, server_id: str, secrets: dict) -> dict:
         return secrets.get("servers", {}).get(server_id, {})
-
-    def _get_managed_mcp_sidecar_path(self) -> Path:
-        return self.config_dir / self._SIDECAR_NAME
-
-    def _read_managed_mcp_ids(self) -> set[str]:
-        path = self._get_managed_mcp_sidecar_path()
-        if not path.exists():
-            return set()
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            ids = data if isinstance(data, list) else data.get("managed", [])
-            return set(str(i) for i in ids)
-        except (json.JSONDecodeError, OSError):
-            return set()
-
-    def _write_managed_mcp_ids(self, server_ids: list[str]) -> None:
-        path = self._get_managed_mcp_sidecar_path()
-        path.write_text(json.dumps(server_ids, indent=2), encoding="utf-8")
-
-    def _merge_managed_servers(self, existing_servers: dict, new_servers: dict) -> dict:
-        managed_ids = self._read_managed_mcp_ids()
-        if not managed_ids:
-            managed_ids = {
-                sid
-                for sid, srv in existing_servers.items()
-                if srv.get(self._MANAGED_MARKER)
-            }
-        merged: dict = {}
-        for sid, srv in existing_servers.items():
-            if sid in managed_ids and sid not in new_servers:
-                continue
-            cleaned = {k: v for k, v in srv.items() if k != self._MANAGED_MARKER}
-            merged[sid] = cleaned
-        for sid, entry in new_servers.items():
-            merged[sid] = dict(entry)
-        self._write_managed_mcp_ids(list(new_servers.keys()))
-        return merged
 
     @staticmethod
     def _set_restrictive_permissions(path: Path) -> None:

@@ -6,11 +6,8 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from ai_sync.helpers import (
-    deep_merge,
-    ensure_dir,
-    write_content_if_different,
-)
+from ai_sync.state_store import StateStore
+from ai_sync.track_write import DELETE, WriteSpec, track_write_blocks
 
 from .base import Client
 
@@ -25,7 +22,6 @@ class CursorClient(Client):
         return Path.home() / ".cursor"
 
     def write_agent(self, slug: str, meta: dict, raw_content: str, prompt_src_path: Path) -> None:
-        ensure_dir(self.get_agents_dir())
         agent_path = self.get_agents_dir() / f"{slug}.md"
         content = f"""---
 name: {json.dumps(meta.get("name", slug))}
@@ -36,7 +32,16 @@ is_background: {"true" if meta.get("is_background", False) else "false"}
 
 {raw_content}
 """
-        write_content_if_different(agent_path, content)
+        track_write_blocks(
+            [
+                WriteSpec(
+                    file_path=agent_path,
+                    format="text",
+                    target=f"ai-sync:agent:{slug}",
+                    value=content,
+                )
+            ]
+        )
 
     def _build_mcp_entry(self, server_id: str, server: dict, secrets: dict) -> dict:
         secret_srv = self._get_secret_for_server(server_id, secrets)
@@ -80,11 +85,31 @@ is_background: {"true" if meta.get("is_background", False) else "false"}
         for sid, srv in servers.items():
             if for_client(srv, self.name):
                 cursor_mcp[sid] = self._build_mcp_entry(sid, srv, secrets)
-        ensure_dir(self.config_dir)
         mcp_path = self.config_dir / "mcp.json"
-        existing = self._read_json_config(mcp_path)
-        existing["mcpServers"] = self._merge_managed_servers(existing.get("mcpServers", {}), cursor_mcp)
-        write_content_if_different(mcp_path, self._write_json_config(existing))
+        specs: list[WriteSpec] = [
+            WriteSpec(
+                file_path=mcp_path,
+                format="json",
+                target=f"/mcpServers/{sid}",
+                value=entry,
+            )
+            for sid, entry in cursor_mcp.items()
+        ]
+        store = StateStore()
+        store.load()
+        existing_targets = store.list_targets(mcp_path, "json", "/mcpServers/")
+        existing_ids = {t.split("/", 2)[2] for t in existing_targets if t.count("/") >= 2}
+        for sid in sorted(existing_ids - set(cursor_mcp.keys())):
+            specs.append(
+                WriteSpec(
+                    file_path=mcp_path,
+                    format="json",
+                    target=f"/mcpServers/{sid}",
+                    value=DELETE,
+                )
+            )
+        if specs:
+            track_write_blocks(specs)
         if any(e.get("env") or e.get("auth") for e in cursor_mcp.values()):
             self._set_restrictive_permissions(mcp_path)
             self._warn_plaintext_secrets(mcp_path)
@@ -99,16 +124,28 @@ is_background: {"true" if meta.get("is_background", False) else "false"}
         updates = self._build_client_config(settings)
         if not updates:
             return
-        ensure_dir(self.config_dir)
         config_path = self.config_dir / "cli-config.json"
-        existing = self._read_json_config(config_path)
-        write_content_if_different(config_path, self._write_json_config(deep_merge(existing, updates)))
+        permissions = updates.get("permissions", {})
+        specs = [
+            WriteSpec(
+                file_path=config_path,
+                format="json",
+                target="/permissions/allow",
+                value=permissions.get("allow", []),
+            ),
+            WriteSpec(
+                file_path=config_path,
+                format="json",
+                target="/permissions/deny",
+                value=permissions.get("deny", []),
+            ),
+        ]
+        track_write_blocks(specs)
 
     def sync_mcp_instructions(self, instructions: str) -> None:
         if not instructions or not instructions.strip():
             return
         rules_dir = self.config_dir / "rules"
-        ensure_dir(rules_dir)
         content = f"""---
 description: MCP server selection guidance (e.g. which Google Workspace to use)
 alwaysApply: true
@@ -118,4 +155,13 @@ alwaysApply: true
 
 {instructions.strip()}
 """
-        write_content_if_different(rules_dir / "mcp-instructions.mdc", content)
+        track_write_blocks(
+            [
+                WriteSpec(
+                    file_path=rules_dir / "mcp-instructions.mdc",
+                    format="text",
+                    target="ai-sync:mcp-instructions",
+                    value=content,
+                )
+            ]
+        )

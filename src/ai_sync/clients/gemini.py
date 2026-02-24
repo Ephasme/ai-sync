@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Callable
 from pathlib import Path
 
-from ai_sync.helpers import (
-    deep_merge,
-    ensure_dir,
-    write_content_if_different,
-)
+from ai_sync.state_store import StateStore
+from ai_sync.track_write import DELETE, WriteSpec, track_write_blocks
 
 from .base import Client
 
@@ -26,7 +22,6 @@ class GeminiClient(Client):
         return Path.home() / ".gemini"
 
     def write_agent(self, slug: str, meta: dict, raw_content: str, prompt_src_path: Path) -> None:
-        ensure_dir(self.get_agents_dir())
         agent_path = self.get_agents_dir() / f"{slug}.md"
         content = f"""---
 name: {slug}
@@ -37,7 +32,16 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
 
 {raw_content}
 """
-        write_content_if_different(agent_path, content)
+        track_write_blocks(
+            [
+                WriteSpec(
+                    file_path=agent_path,
+                    format="text",
+                    target=f"ai-sync:agent:{slug}",
+                    value=content,
+                )
+            ]
+        )
 
     def _build_mcp_entry(self, server_id: str, server: dict, secrets: dict) -> dict:
         secret_srv = self._get_secret_for_server(server_id, secrets)
@@ -90,11 +94,31 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
             gemini_mcp[sid] = entry
             if entry.get("env") or entry.get("oauth"):
                 has_secrets = True
-        ensure_dir(self.config_dir)
         settings_path = self.config_dir / "settings.json"
-        existing = self._read_json_config(settings_path)
-        existing["mcpServers"] = self._merge_managed_servers(existing.get("mcpServers", {}), gemini_mcp)
-        write_content_if_different(settings_path, self._write_json_config(existing))
+        specs: list[WriteSpec] = [
+            WriteSpec(
+                file_path=settings_path,
+                format="json",
+                target=f"/mcpServers/{sid}",
+                value=entry,
+            )
+            for sid, entry in gemini_mcp.items()
+        ]
+        store = StateStore()
+        store.load()
+        existing_targets = store.list_targets(settings_path, "json", "/mcpServers/")
+        existing_ids = {t.split("/", 2)[2] for t in existing_targets if t.count("/") >= 2}
+        for sid in sorted(existing_ids - set(gemini_mcp.keys())):
+            specs.append(
+                WriteSpec(
+                    file_path=settings_path,
+                    format="json",
+                    target=f"/mcpServers/{sid}",
+                    value=DELETE,
+                )
+            )
+        if specs:
+            track_write_blocks(specs)
         if has_secrets:
             self._set_restrictive_permissions(settings_path)
             self._warn_plaintext_secrets(settings_path)
@@ -129,40 +153,77 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
         updates = self._build_client_config(settings)
         if not updates:
             return
-        ensure_dir(self.config_dir)
         settings_path = self.config_dir / "settings.json"
-        existing = self._read_json_config(settings_path)
-        write_content_if_different(settings_path, self._write_json_config(deep_merge(existing, updates)))
+        specs: list[WriteSpec] = []
+        experimental = updates.get("experimental", {}) or {}
+        if "plan" in experimental:
+            specs.append(
+                WriteSpec(
+                    file_path=settings_path,
+                    format="json",
+                    target="/experimental/plan",
+                    value=experimental["plan"],
+                )
+            )
+        if "enableAgents" in experimental:
+            specs.append(
+                WriteSpec(
+                    file_path=settings_path,
+                    format="json",
+                    target="/experimental/enableAgents",
+                    value=experimental["enableAgents"],
+                )
+            )
+        general = updates.get("general", {}) or {}
+        if "defaultApprovalMode" in general:
+            specs.append(
+                WriteSpec(
+                    file_path=settings_path,
+                    format="json",
+                    target="/general/defaultApprovalMode",
+                    value=general["defaultApprovalMode"],
+                )
+            )
+        tools = updates.get("tools", {}) or {}
+        if "sandbox" in tools:
+            specs.append(
+                WriteSpec(
+                    file_path=settings_path,
+                    format="json",
+                    target="/tools/sandbox",
+                    value=tools["sandbox"],
+                )
+            )
+        if specs:
+            track_write_blocks(specs)
 
     def sync_mcp_instructions(self, instructions: str) -> None:
         if not instructions or not instructions.strip():
             return
-        ensure_dir(self.config_dir)
         gemini_md = self.config_dir / "GEMINI.md"
-        begin_marker = "<!-- BEGIN ai-sync MCP instructions -->"
-        end_marker = "<!-- END ai-sync MCP instructions -->"
-        section = f"\n\n## MCP Server Instructions (ai-sync)\n\n{instructions.strip()}\n"
-        block = f"{begin_marker}\n{section.strip()}\n{end_marker}"
-        if gemini_md.exists():
-            content = gemini_md.read_text(encoding="utf-8")
-            pattern = re.compile(rf"{re.escape(begin_marker)}.*?{re.escape(end_marker)}", re.DOTALL)
-            new_content = pattern.sub(block, content) if pattern.search(content) else content.rstrip() + "\n\n" + block + "\n"
-        else:
-            new_content = block + "\n"
-        write_content_if_different(gemini_md, new_content)
+        section = f"## MCP Server Instructions (ai-sync)\n\n{instructions.strip()}\n"
+        track_write_blocks(
+            [
+                WriteSpec(
+                    file_path=gemini_md,
+                    format="text",
+                    target="ai-sync:mcp-instructions",
+                    value=section,
+                )
+            ]
+        )
 
     def enable_subagents_fallback(self) -> None:
         settings_path = self.config_dir / "settings.json"
         if not settings_path.exists():
             return
-        data = self._read_json_config(settings_path)
-        changed = False
-        if "experimental" not in data:
-            data["experimental"] = {}
-            changed = True
-        if not data["experimental"].get("enableAgents"):
-            data["experimental"]["enableAgents"] = True
-            changed = True
-        if changed:
-            print("  Enabling experimental.enableAgents in ~/.gemini/settings.json")
-            write_content_if_different(settings_path, self._write_json_config(data))
+        track_write_blocks(
+            [
+                WriteSpec(
+                    file_path=settings_path,
+                    format="json",
+                    target="/experimental/enableAgents",
+                    value=True,
+                )
+            ]
+        )

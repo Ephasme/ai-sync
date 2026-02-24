@@ -161,6 +161,7 @@ def test_sync_skills_copies_root_files(tmp_path: Path, monkeypatch) -> None:
     skill_root.mkdir(parents=True)
     (skill_root / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
     (skill_root / "reference.md").write_text("ref\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path))
     display = FakeDisplay()
     calls: list[str] = []
     client = DummyClient("codex", tmp_path, calls)
