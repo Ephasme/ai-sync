@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from ai_sync.clients.codex import CodexClient
 from ai_sync.clients.cursor import CursorClient
 from ai_sync.clients.gemini import GeminiClient
@@ -9,7 +11,7 @@ from ai_sync.clients.gemini import GeminiClient
 
 
 def test_cursor_build_mcp_entry() -> None:
-    client = CursorClient()
+    client = CursorClient(Path("/tmp/test"))
     entry = client._build_mcp_entry(
         "s",
         {"method": "stdio", "command": "npx", "args": ["x"], "env": {"K": "V"}, "timeout_seconds": 1},
@@ -21,18 +23,17 @@ def test_cursor_build_mcp_entry() -> None:
 
 
 def test_codex_build_mcp_entry_http() -> None:
-    client = CodexClient()
+    client = CodexClient(Path("/tmp/test"))
     entry = client._build_mcp_entry(
         "s",
-        {"method": "http", "url": "https://x", "enabled": True},
+        {"method": "http", "url": "https://x"},
         {"servers": {}},
     )
-    assert entry["enabled"] is True
     assert entry["url"] == "https://x"
 
 
 def test_gemini_build_mcp_entry_oauth() -> None:
-    client = GeminiClient()
+    client = GeminiClient(Path("/tmp/test"))
     entry = client._build_mcp_entry(
         "s",
         {
@@ -46,7 +47,7 @@ def test_gemini_build_mcp_entry_oauth() -> None:
 
 
 def test_codex_build_mcp_entry_with_description_and_timeout() -> None:
-    client = CodexClient()
+    client = CodexClient(Path("/tmp/test"))
     entry = client._build_mcp_entry(
         "s",
         {
@@ -64,7 +65,7 @@ def test_codex_build_mcp_entry_with_description_and_timeout() -> None:
 
 
 def test_codex_build_mcp_entry_bearer_token_env_var() -> None:
-    client = CodexClient()
+    client = CodexClient(Path("/tmp/test"))
     entry = client._build_mcp_entry(
         "s",
         {"method": "http", "url": "https://x", "bearer_token_env_var": "MY_TOKEN"},
@@ -74,7 +75,7 @@ def test_codex_build_mcp_entry_bearer_token_env_var() -> None:
 
 
 def test_cursor_build_mcp_entry_http_with_trust() -> None:
-    client = CursorClient()
+    client = CursorClient(Path("/tmp/test"))
     entry = client._build_mcp_entry(
         "s",
         {"method": "http", "url": "https://x", "trust": True, "description": "A service"},
@@ -87,7 +88,7 @@ def test_cursor_build_mcp_entry_http_with_trust() -> None:
 
 
 def test_gemini_build_mcp_entry_stdio() -> None:
-    client = GeminiClient()
+    client = GeminiClient(Path("/tmp/test"))
     entry = client._build_mcp_entry(
         "s",
         {"method": "stdio", "command": "python", "args": ["-m", "srv"], "trust": True, "timeout_seconds": 10},
@@ -100,7 +101,7 @@ def test_gemini_build_mcp_entry_stdio() -> None:
 
 
 def test_gemini_build_mcp_entry_http_urls() -> None:
-    client = GeminiClient()
+    client = GeminiClient(Path("/tmp/test"))
     entry = client._build_mcp_entry(
         "s",
         {"method": "http", "url": "https://a", "httpUrl": "https://b", "description": "D"},
@@ -112,7 +113,7 @@ def test_gemini_build_mcp_entry_http_urls() -> None:
 
 
 def test_codex_build_mcp_entry_env_merges_secrets() -> None:
-    client = CodexClient()
+    client = CodexClient(Path("/tmp/test"))
     entry = client._build_mcp_entry(
         "s",
         {"method": "stdio", "command": "a", "env": {"PUBLIC": "1"}},
@@ -129,69 +130,69 @@ def test_codex_build_mcp_entry_env_merges_secrets() -> None:
 
 class TestCodexBuildClientConfig:
     def test_yolo(self) -> None:
-        cfg = CodexClient()._build_client_config({"mode": "yolo"})
+        cfg = CodexClient(Path("/tmp/test"))._build_client_config({"mode": "yolo"})
         assert cfg["approval_policy"] == "never"
         assert cfg["sandbox_mode"] == "danger-full-access"
 
     def test_normal(self) -> None:
-        cfg = CodexClient()._build_client_config({"mode": "normal"})
+        cfg = CodexClient(Path("/tmp/test"))._build_client_config({"mode": "normal"})
         assert cfg["approval_policy"] == "untrusted"
 
     def test_strict(self) -> None:
-        cfg = CodexClient()._build_client_config({"mode": "strict"})
+        cfg = CodexClient(Path("/tmp/test"))._build_client_config({"mode": "strict"})
         assert cfg["approval_policy"] == "on-request"
         assert cfg["sandbox_mode"] == "read-only"
 
     def test_unknown_mode(self) -> None:
-        cfg = CodexClient()._build_client_config({"mode": "custom"})
+        cfg = CodexClient(Path("/tmp/test"))._build_client_config({"mode": "custom"})
         assert cfg["approval_policy"] == "on-request"
         assert cfg["sandbox_mode"] == "workspace-write"
 
     def test_experimental_flag(self) -> None:
-        cfg = CodexClient()._build_client_config({"mode": "normal", "experimental": True})
+        cfg = CodexClient(Path("/tmp/test"))._build_client_config({"mode": "normal", "experimental": True})
         assert cfg["suppress_unstable_features_warning"] is True
 
     def test_subagents(self) -> None:
-        cfg = CodexClient()._build_client_config({"mode": "normal", "subagents": True})
+        cfg = CodexClient(Path("/tmp/test"))._build_client_config({"mode": "normal", "subagents": True})
         assert cfg["features"]["multi_agent"] is True
         assert cfg["features"]["child_agents_md"] is True
 
 
 class TestCursorBuildClientConfig:
     def test_yolo(self) -> None:
-        cfg = CursorClient()._build_client_config({"mode": "yolo"})
+        cfg = CursorClient(Path("/tmp/test"))._build_client_config({"mode": "yolo"})
         assert "Shell(*)" in cfg["permissions"]["allow"]
 
     def test_normal(self) -> None:
-        cfg = CursorClient()._build_client_config({"mode": "normal"})
+        cfg = CursorClient(Path("/tmp/test"))._build_client_config({"mode": "normal"})
         assert "Shell(*)" in cfg["permissions"]["allow"]
 
     def test_strict(self) -> None:
-        cfg = CursorClient()._build_client_config({"mode": "strict"})
+        cfg = CursorClient(Path("/tmp/test"))._build_client_config({"mode": "strict"})
         assert cfg["permissions"]["allow"] == []
 
 
 class TestGeminiBuildClientConfig:
     def test_normal(self) -> None:
-        cfg = GeminiClient()._build_client_config({"mode": "normal"})
+        cfg = GeminiClient(Path("/tmp/test"))._build_client_config({"mode": "normal"})
         assert cfg["general"]["defaultApprovalMode"] == "auto_edit"
         assert cfg["tools"]["sandbox"] is False
 
     def test_strict(self) -> None:
-        cfg = GeminiClient()._build_client_config({"mode": "strict"})
+        cfg = GeminiClient(Path("/tmp/test"))._build_client_config({"mode": "strict"})
         assert cfg["general"]["defaultApprovalMode"] == "plan"
         assert cfg["experimental"]["plan"] is True
         assert cfg["tools"]["sandbox"] is True
 
     def test_yolo(self) -> None:
-        cfg = GeminiClient()._build_client_config({"mode": "yolo"})
+        cfg = GeminiClient(Path("/tmp/test"))._build_client_config({"mode": "yolo"})
         assert cfg["general"]["defaultApprovalMode"] == "yolo"
         assert cfg["tools"]["sandbox"] is False
 
     def test_subagents(self) -> None:
-        cfg = GeminiClient()._build_client_config({"mode": "normal", "subagents": True})
+        cfg = GeminiClient(Path("/tmp/test"))._build_client_config({"mode": "normal", "subagents": True})
         assert cfg["experimental"]["enableAgents"] is True
 
     def test_sandbox_from_tools_setting(self) -> None:
-        cfg = GeminiClient()._build_client_config({"mode": "unknown", "tools": {"sandbox": True}})
+        cfg = GeminiClient(Path("/tmp/test"))._build_client_config({"mode": "unknown", "tools": {"sandbox": True}})
         assert cfg["tools"]["sandbox"] is True

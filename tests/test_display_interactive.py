@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from ai_sync.display.plain import PlainDisplay
 from ai_sync.display.rich import RichDisplay
-from ai_sync.interactive import run_interactive_prompts
+from ai_sync.interactive import run_init_prompts
 
 
 def test_plain_display_methods() -> None:
@@ -31,23 +31,52 @@ class DummyPrompt:
         return self.result
 
 
-def test_run_interactive_prompts_ok(monkeypatch) -> None:
-    results = [DummyPrompt(["a"]), DummyPrompt(["s"])]
+def test_run_init_prompts_ok(monkeypatch) -> None:
+    results = [
+        DummyPrompt(["a"]),
+        DummyPrompt(["s"]),
+        DummyPrompt(["cmd"]),
+        DummyPrompt(["mcp1"]),
+        DummyPrompt("normal"),
+        DummyPrompt(True),
+        DummyPrompt(True),
+        DummyPrompt(False),
+    ]
 
-    def _next_checkbox(*_args, **_kwargs):
-        return results.pop(0)
+    def _next(*_args, **_kwargs):
+        return results.pop(0) if results else DummyPrompt(None)
 
-    monkeypatch.setattr("questionary.checkbox", _next_checkbox)
-    monkeypatch.setattr("questionary.confirm", lambda *_args, **_kwargs: DummyPrompt(True))
+    monkeypatch.setattr("questionary.checkbox", lambda *a, **k: _next())
+    monkeypatch.setattr("questionary.select", lambda *a, **k: _next())
+    monkeypatch.setattr("questionary.confirm", lambda *a, **k: _next())
     display = PlainDisplay()
-    opts = run_interactive_prompts(display, ["a"], ["s"])
-    assert opts is not None
-    assert "a" in opts.agent_stems
-    assert "s" in opts.skill_names
-    assert opts.install_settings is True
+    result = run_init_prompts(
+        display,
+        available_agents=["a"],
+        available_skills=["s"],
+        available_commands=["cmd"],
+        available_mcp_servers=["mcp1"],
+        defaults={},
+    )
+    assert result is not None
+    assert "a" in result["agents"]
+    assert "s" in result["skills"]
+    assert "cmd" in result["commands"]
+    assert "mcp1" in result["mcp-servers"]
+    assert result["settings"]["mode"] == "normal"
 
 
-def test_run_interactive_prompts_cancel(monkeypatch) -> None:
-    monkeypatch.setattr("questionary.checkbox", lambda *_args, **_kwargs: DummyPrompt(None))
+def test_run_init_prompts_cancel(monkeypatch) -> None:
+    monkeypatch.setattr("questionary.checkbox", lambda *a, **k: DummyPrompt(None))
     display = PlainDisplay()
-    assert run_interactive_prompts(display, ["a"], ["s"]) is None
+    assert (
+        run_init_prompts(
+            display,
+            available_agents=["a"],
+            available_skills=["s"],
+            available_commands=[],
+            available_mcp_servers=[],
+            defaults={},
+        )
+        is None
+    )

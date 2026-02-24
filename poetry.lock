@@ -149,6 +149,24 @@ files = [
 ]
 
 [[package]]
+name = "pathspec"
+version = "1.0.4"
+description = "Utility library for gitignore style pattern matching of file paths."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "pathspec-1.0.4-py3-none-any.whl", hash = "sha256:fb6ae2fd4e7c921a165808a552060e722767cfa526f99ca5156ed2ce45a5c723"},
+    {file = "pathspec-1.0.4.tar.gz", hash = "sha256:0210e2ae8a21a9137c0d470578cb0e595af87edaa6ebf12ff176f14a02e0e645"},
+]
+
+[package.extras]
+hyperscan = ["hyperscan (>=0.7)"]
+optional = ["typing-extensions (>=4)"]
+re2 = ["google-re2 (>=1.1)"]
+tests = ["pytest (>=9)", "typing-extensions (>=4.15)"]
+
+[[package]]
 name = "pluggy"
 version = "1.6.0"
 description = "plugin and hook calling mechanisms for python"
@@ -621,4 +639,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11"
-content-hash = "e6a5c5a5d63004fc66733dbd0a4ea6e634fdf8166058b277f0801c83647141fb"
+content-hash = "6a7bddb7348ee286a011d1edbef4de567e4331f01fa9ce262d4259cee5260381"

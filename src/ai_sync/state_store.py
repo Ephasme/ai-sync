@@ -8,7 +8,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config_store import get_config_root
 from .helpers import ensure_dir
 
 
@@ -24,9 +23,8 @@ class StateEntry:
 
 
 class StateStore:
-    def __init__(self, config_root: Path | None = None) -> None:
-        root = config_root or get_config_root()
-        self._state_root = root / "state"
+    def __init__(self, project_root: Path) -> None:
+        self._state_root = project_root / ".ai-sync" / "state"
         self._state_path = self._state_root / "state.json"
         self._blob_dir = self._state_root / "blobs"
         self._data: dict = {"version": STATE_VERSION, "entries": []}

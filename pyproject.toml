@@ -37,6 +37,7 @@ tomli = ">=2.0"
 tomli-w = ">=1.0"
 rich = ">=13.0"
 questionary = ">=2.0"
+pathspec = ">=0.12"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0"

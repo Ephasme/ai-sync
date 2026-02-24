@@ -47,7 +47,7 @@ def get_default_versions_path() -> Path:
 
 def check_client_versions(versions_path: Path) -> tuple[bool, str]:
     if not versions_path.exists():
-        return False, f"Missing version lock file: {versions_path}. Run `ai-sync sync --force` once."
+        return False, f"Missing version lock file: {versions_path}."
     try:
         expected = json.loads(versions_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:

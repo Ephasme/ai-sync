@@ -30,3 +30,14 @@ def load_manifest(mcp_root: Path, display: Display) -> dict:
     except ValidationError as exc:
         raise RuntimeError(f"Manifest validation failed: {exc}") from exc
     return model.model_dump(by_alias=True)
+
+
+def load_and_filter_mcp(
+    config_root: Path,
+    enabled_server_ids: list[str],
+    display: Display,
+) -> dict:
+    manifest = load_manifest(config_root / "config", display)
+    servers = manifest.get("servers") or {}
+    filtered = {sid: srv for sid, srv in servers.items() if sid in enabled_server_ids}
+    return filtered

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from pathlib import Path
 
 from ai_sync import mcp_sync
+from ai_sync.clients.base import Client
+from ai_sync.state_store import StateStore
 
 
 class FakeDisplay:
@@ -22,52 +24,50 @@ class FakeDisplay:
         self.messages.append(("table", ",".join(headers)))
 
 
-@dataclass
-class DummyClient:
-    name: str
-    calls: list[str]
-    fail_mcp: bool = False
-    instructions: list[str] | None = None
+class DummyClient(Client):
+    def __init__(self, client_name: str, project_root: Path, calls: list[str], *, fail_mcp: bool = False) -> None:
+        super().__init__(project_root)
+        self._name = client_name
+        self.calls = calls
+        self.fail_mcp = fail_mcp
 
-    def sync_mcp(self, servers: dict, secrets: dict, for_client) -> None:
-        self.calls.append(f"sync_mcp:{self.name}")
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def write_agent(self, slug: str, meta: dict, raw_content: str, prompt_src_path: Path, store: StateStore) -> None:
+        pass
+
+    def write_command(self, slug: str, raw_content: str, command_src_path: Path, store: StateStore) -> None:
+        pass
+
+    def sync_mcp(self, servers: dict, secrets: dict, store: StateStore) -> None:
+        self.calls.append(f"sync_mcp:{self._name}")
         if self.fail_mcp:
             raise RuntimeError("boom")
 
-    def sync_mcp_instructions(self, instructions: str) -> None:
-        self.calls.append(f"sync_mcp_instructions:{self.name}")
-        if self.instructions is not None:
-            self.instructions.append(instructions)
+    def sync_client_config(self, settings: dict, store: StateStore) -> None:
+        pass
 
 
-def test_server_applies_to_client() -> None:
+def test_sync_mcp_servers_skips_when_empty() -> None:
     display = FakeDisplay()
-    assert not mcp_sync.server_applies_to_client({"enabled": False}, "codex", display)
-    assert not mcp_sync.server_applies_to_client({"clients": "codex"}, "codex", display)
-    assert mcp_sync.server_applies_to_client({"clients": ["codex"]}, "codex", display)
-    assert any("clients' should be a list" in msg for _, msg in display.messages)
-
-
-def test_sync_mcp_servers_skips_when_empty(monkeypatch) -> None:
-    display = FakeDisplay()
-    monkeypatch.setattr(mcp_sync, "CLIENTS", [])
-    mcp_sync.sync_mcp_servers({}, display)
+    mcp_sync.sync_mcp_servers({}, [], {}, StateStore(Path("/tmp")), display)
     assert any("MCP Servers: skipping" in msg for _, msg in display.messages)
 
 
-def test_sync_mcp_servers_handles_errors_and_instructions(monkeypatch) -> None:
+def test_sync_mcp_servers_handles_errors() -> None:
     display = FakeDisplay()
     calls: list[str] = []
-    instructions: list[str] = []
+    project_root = Path("/tmp/project")
     clients = [
-        DummyClient("codex", calls, fail_mcp=True),
-        DummyClient("cursor", calls, instructions=instructions),
+        DummyClient("codex", project_root, calls, fail_mcp=True),
+        DummyClient("cursor", project_root, calls),
     ]
-    monkeypatch.setattr(mcp_sync, "CLIENTS", clients)
-    manifest = {"servers": {"s1": {"method": "stdio", "command": "npx"}}, "global": {"instructions": "Use work MCP"}}
-    mcp_sync.sync_mcp_servers(manifest, display)
+    store = StateStore(project_root)
+    servers = {"s1": {"method": "stdio", "command": "npx"}}
+    secrets: dict = {}
+    mcp_sync.sync_mcp_servers(servers, clients, secrets, store, display)
     assert "sync_mcp:codex" in calls
     assert "sync_mcp:cursor" in calls
-    assert "sync_mcp_instructions:cursor" in calls
-    assert instructions == ["Use work MCP"]
     assert any("MCP sync failed" in msg for _, msg in display.messages)

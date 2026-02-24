@@ -6,14 +6,17 @@ import json
 import os
 import stat
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from pathlib import Path
 
 import tomli
 import tomli_w
 
+from ai_sync.state_store import StateStore
+
 
 class Client(ABC):
+    def __init__(self, project_root: Path) -> None:
+        self._project_root = project_root
 
     @property
     @abstractmethod
@@ -21,9 +24,8 @@ class Client(ABC):
         ...
 
     @property
-    @abstractmethod
     def config_dir(self) -> Path:
-        ...
+        return self._project_root / f".{self.name}"
 
     def get_agents_dir(self) -> Path:
         return self.config_dir / "agents"
@@ -87,23 +89,23 @@ class Client(ABC):
         print(f"  Warning: Secrets written in plaintext to {path}. Consider using a secrets manager.")
 
     @abstractmethod
-    def write_agent(self, slug: str, meta: dict, raw_content: str, prompt_src_path: Path) -> None:
+    def write_agent(self, slug: str, meta: dict, raw_content: str, prompt_src_path: Path, store: StateStore) -> None:
         ...
 
     @abstractmethod
-    def write_command(self, slug: str, raw_content: str, command_src_path: Path) -> None:
+    def write_command(self, slug: str, raw_content: str, command_src_path: Path, store: StateStore) -> None:
         ...
 
     @abstractmethod
-    def sync_mcp(self, servers: dict, secrets: dict, for_client: Callable[[dict, str], bool]) -> None:
+    def sync_mcp(self, servers: dict, secrets: dict, store: StateStore) -> None:
         ...
 
     @abstractmethod
-    def sync_client_config(self, settings: dict) -> None:
+    def sync_client_config(self, settings: dict, store: StateStore) -> None:
         ...
 
-    def enable_subagents_fallback(self) -> None:
+    def sync_instructions(self, instructions_content: str, store: StateStore) -> None:
         pass
 
-    def sync_mcp_instructions(self, instructions: str) -> None:
-        pass
+    def post_apply(self) -> None:
+        """Hook called after all sync operations complete. Override for client-specific setup."""

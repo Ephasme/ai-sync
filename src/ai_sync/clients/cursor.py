@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from pathlib import Path
 
 from ai_sync.state_store import StateStore
@@ -13,15 +12,14 @@ from .base import Client
 
 
 class CursorClient(Client):
+    def __init__(self, project_root: Path) -> None:
+        super().__init__(project_root)
+
     @property
     def name(self) -> str:
         return "cursor"
 
-    @property
-    def config_dir(self) -> Path:
-        return Path.home() / ".cursor"
-
-    def write_agent(self, slug: str, meta: dict, raw_content: str, prompt_src_path: Path) -> None:
+    def write_agent(self, slug: str, meta: dict, raw_content: str, prompt_src_path: Path, store: StateStore) -> None:
         agent_path = self.get_agents_dir() / f"{slug}.md"
         content = f"""---
 name: {json.dumps(meta.get("name", slug))}
@@ -40,10 +38,11 @@ is_background: {"true" if meta.get("is_background", False) else "false"}
                     target=f"ai-sync:agent:{slug}",
                     value=content,
                 )
-            ]
+            ],
+            store,
         )
 
-    def write_command(self, slug: str, raw_content: str, command_src_path: Path) -> None:
+    def write_command(self, slug: str, raw_content: str, command_src_path: Path, store: StateStore) -> None:
         if command_src_path.suffix == ".mdc":
             target_dir = self.config_dir / "rules"
         else:
@@ -57,7 +56,8 @@ is_background: {"true" if meta.get("is_background", False) else "false"}
                     target=f"ai-sync:command:{slug}",
                     value=raw_content,
                 )
-            ]
+            ],
+            store,
         )
 
     def _build_mcp_entry(self, server_id: str, server: dict, secrets: dict) -> dict:
@@ -97,11 +97,10 @@ is_background: {"true" if meta.get("is_background", False) else "false"}
                 )
         return entry
 
-    def sync_mcp(self, servers: dict, secrets: dict, for_client: Callable[[dict, str], bool]) -> None:
+    def sync_mcp(self, servers: dict, secrets: dict, store: StateStore) -> None:
         cursor_mcp: dict = {}
         for sid, srv in servers.items():
-            if for_client(srv, self.name):
-                cursor_mcp[sid] = self._build_mcp_entry(sid, srv, secrets)
+            cursor_mcp[sid] = self._build_mcp_entry(sid, srv, secrets)
         mcp_path = self.config_dir / "mcp.json"
         specs: list[WriteSpec] = [
             WriteSpec(
@@ -112,8 +111,6 @@ is_background: {"true" if meta.get("is_background", False) else "false"}
             )
             for sid, entry in cursor_mcp.items()
         ]
-        store = StateStore()
-        store.load()
         existing_targets = store.list_targets(mcp_path, "json", "/mcpServers/")
         existing_ids = {t.split("/", 2)[2] for t in existing_targets if t.count("/") >= 2}
         for sid in sorted(existing_ids - set(cursor_mcp.keys())):
@@ -126,7 +123,7 @@ is_background: {"true" if meta.get("is_background", False) else "false"}
                 )
             )
         if specs:
-            track_write_blocks(specs)
+            track_write_blocks(specs, store)
         if any(e.get("env") or e.get("auth") for e in cursor_mcp.values()):
             self._set_restrictive_permissions(mcp_path)
             self._warn_plaintext_secrets(mcp_path)
@@ -137,7 +134,7 @@ is_background: {"true" if meta.get("is_background", False) else "false"}
             return {"permissions": {"allow": ["Shell(*)", "Read(*)", "Write(*)", "WebFetch(*)", "Mcp(*:*)"], "deny": []}}
         return {"permissions": {"allow": [], "deny": []}}
 
-    def sync_client_config(self, settings: dict) -> None:
+    def sync_client_config(self, settings: dict, store: StateStore) -> None:
         updates = self._build_client_config(settings)
         if not updates:
             return
@@ -157,28 +154,27 @@ is_background: {"true" if meta.get("is_background", False) else "false"}
                 value=permissions.get("deny", []),
             ),
         ]
-        track_write_blocks(specs)
+        track_write_blocks(specs, store)
 
-    def sync_mcp_instructions(self, instructions: str) -> None:
-        if not instructions or not instructions.strip():
+    def sync_instructions(self, instructions_content: str, store: StateStore) -> None:
+        if not instructions_content.strip():
             return
         rules_dir = self.config_dir / "rules"
         content = f"""---
-description: MCP server selection guidance (e.g. which Google Workspace to use)
+description: Project instructions managed by ai-sync
 alwaysApply: true
 ---
 
-# MCP Server Instructions
-
-{instructions.strip()}
+{instructions_content.strip()}
 """
         track_write_blocks(
             [
                 WriteSpec(
-                    file_path=rules_dir / "mcp-instructions.mdc",
+                    file_path=rules_dir / "instructions.mdc",
                     format="text",
-                    target="ai-sync:mcp-instructions",
+                    target="ai-sync:instructions",
                     value=content,
                 )
-            ]
+            ],
+            store,
         )

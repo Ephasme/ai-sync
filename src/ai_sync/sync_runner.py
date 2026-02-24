@@ -1,50 +1,30 @@
-"""Main orchestration (preflight + execute)."""
+"""Main orchestration for project-scoped apply."""
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence, cast
 
 import tomli
 import yaml
 
-from ai_sync.clients import CLIENTS
+from ai_sync.clients import Client, create_clients
 from ai_sync.display import Display
-from ai_sync.env_loader import collect_env_refs, resolve_env_refs_in_obj
 from ai_sync.helpers import (
     ensure_dir,
     extract_description,
     validate_client_settings,
     to_kebab_case,
 )
-from ai_sync.interactive import SyncOptions, run_interactive_prompts
-from ai_sync.manifest_loader import load_manifest
 from ai_sync.mcp_sync import sync_mcp_servers
-from ai_sync.config_store import get_config_root
-from ai_sync.op_inject import load_runtime_env_from_op
-from ai_sync.precedence import apply_overrides
-from ai_sync.path_ops import escape_path_segment
-from ai_sync.version_checks import check_client_versions, detect_client_versions, get_default_versions_path
+from ai_sync.project import ProjectManifest
 from ai_sync.state_store import StateStore
 from ai_sync.track_write import DELETE, WriteSpec, track_write_blocks
+from ai_sync.path_ops import escape_path_segment
 
 GENERIC_METADATA_KEYS = {"slug", "name", "description"}
 SKIP_PATTERNS = {".venv", "node_modules", "__pycache__", ".git", ".DS_Store"}
-
-
-@dataclass
-class RunConfig:
-    config_root: Path
-    source_prompts: Path
-    source_skills: Path
-    source_commands: Path
-    source_mcp: Path
-    source_client_config: Path
-    source_env_template: Path
-    overrides: Sequence[tuple[str, object]]
-    options: SyncOptions
 
 
 def load_prompt_metadata(prompt_path: Path, content: str, display: Display) -> dict:
@@ -70,51 +50,62 @@ def load_prompt_metadata(prompt_path: Path, content: str, display: Display) -> d
     return result
 
 
-def sync_agents(config: RunConfig, display: Display) -> None:
+def sync_agents(
+    config_root: Path,
+    agent_list: list[str],
+    clients: Sequence[Client],
+    store: StateStore,
+    display: Display,
+) -> None:
     display.rule("Syncing Agents")
-    prompts = sorted(config.source_prompts.glob("*.md"))
-    prompts = [p for p in prompts if p.stem in config.options.agent_stems]
+    source_prompts = config_root / "config" / "prompts"
+    if not source_prompts.exists():
+        display.print("No agents source found", style="dim")
+        return
+    prompts = sorted(source_prompts.glob("*.md"))
+    prompts = [p for p in prompts if p.stem in agent_list]
     if not prompts:
         display.print("No agents selected", style="dim")
         return
-    if not config.source_client_config.exists():
-        gemini = next((c for c in CLIENTS if c.name == "gemini"), None)
-        if gemini:
-            gemini.enable_subagents_fallback()
 
     rows: list[tuple[str, ...]] = []
     for prompt_path in prompts:
         raw_content = prompt_path.read_text(encoding="utf-8")
         meta = load_prompt_metadata(prompt_path, raw_content, display)
         slug = meta.get("slug", to_kebab_case(prompt_path.stem))
-        rows.append((prompt_path.stem, to_kebab_case(prompt_path.stem), ", ".join(c.name for c in CLIENTS)))
-        for client in CLIENTS:
-            client.write_agent(slug, meta, raw_content, prompt_path)
+        rows.append((prompt_path.stem, to_kebab_case(prompt_path.stem), ", ".join(c.name for c in clients)))
+        for client in clients:
+            client.write_agent(slug, meta, raw_content, prompt_path, store)
     display.table(("Agent", "Slug", "Clients"), rows)
 
 
-def sync_skills(config: RunConfig, display: Display) -> None:
+def sync_skills(
+    config_root: Path,
+    skill_list: list[str],
+    clients: Sequence[Client],
+    store: StateStore,
+    display: Display,
+) -> None:
     display.rule("Syncing Skills")
-    if not config.source_skills.exists():
-        display.print("No skills selected", style="dim")
+    source_skills = config_root / "config" / "skills"
+    if not source_skills.exists():
+        display.print("No skills source found", style="dim")
         return
-    skill_dirs = sorted(d for d in config.source_skills.iterdir() if d.is_dir() and (d / "SKILL.md").exists())
-    skill_dirs = [d for d in skill_dirs if d.name in config.options.skill_names]
+    skill_dirs = sorted(d for d in source_skills.iterdir() if d.is_dir() and (d / "SKILL.md").exists())
+    skill_dirs = [d for d in skill_dirs if d.name in skill_list]
     if not skill_dirs:
         display.print("No skills selected", style="dim")
         return
     rows: list[tuple[str, ...]] = []
     for skill_dir in skill_dirs:
         kebab_name = to_kebab_case(skill_dir.name)
-        rows.append((skill_dir.name, kebab_name, ", ".join(c.name for c in CLIENTS)))
-        for client in CLIENTS:
+        rows.append((skill_dir.name, kebab_name, ", ".join(c.name for c in clients)))
+        for client in clients:
             target_base = client.get_skills_dir()
             ensure_dir(target_base)
             target_skill_dir = target_base / kebab_name
             ensure_dir(target_skill_dir)
             specs: list[WriteSpec] = []
-            store = StateStore()
-            store.load()
             for sub in skill_dir.rglob("*"):
                 rel = sub.relative_to(skill_dir)
                 if any(part in SKIP_PATTERNS for part in rel.parts):
@@ -123,57 +114,65 @@ def sync_skills(config: RunConfig, display: Display) -> None:
                     continue
                 target = target_skill_dir / rel
                 if sub.name.endswith(".json"):
-                    format = "json"
+                    fmt = "json"
                 elif sub.name.endswith(".toml"):
-                    format = "toml"
+                    fmt = "toml"
                 elif sub.name.endswith(".yaml") or sub.name.endswith(".yml"):
-                    format = "yaml"
+                    fmt = "yaml"
                 else:
-                    format = "text"
+                    fmt = "text"
                 content = sub.read_text(encoding="utf-8")
                 marker_id = f"ai-sync:skill:{kebab_name}:{rel.as_posix()}"
-                if format == "text":
+                if fmt == "text":
                     specs.append(
                         WriteSpec(
                             file_path=target,
-                            format=format,
+                            format=fmt,
                             target=marker_id,
                             value=content,
                         )
                     )
                     continue
-                data = _parse_structured_content(content, format)
-                leaf_specs = _flatten_structured_to_specs(target, format, data)
-                existing_targets = set(store.list_targets(target, format, "/"))
+                data = _parse_structured_content(content, fmt)
+                leaf_specs = _flatten_structured_to_specs(target, fmt, data)
+                existing_targets = set(store.list_targets(target, fmt, "/"))
                 current_targets = {spec.target for spec in leaf_specs}
                 for stale_target in sorted(existing_targets - current_targets):
                     leaf_specs.append(
                         WriteSpec(
                             file_path=target,
-                            format=format,
+                            format=fmt,
                             target=stale_target,
                             value=DELETE,
                         )
                     )
                 specs.extend(leaf_specs)
             if specs:
-                track_write_blocks(specs)
+                track_write_blocks(specs, store)
     display.table(("Skill", "Slug", "Clients"), rows)
 
 
-def sync_commands(config: RunConfig, display: Display) -> None:
+def sync_commands(
+    config_root: Path,
+    command_list: list[str],
+    clients: Sequence[Client],
+    store: StateStore,
+    display: Display,
+) -> None:
     display.rule("Syncing Commands")
-    if not config.source_commands.exists():
-        display.print("No commands selected", style="dim")
+    source_commands = config_root / "config" / "commands"
+    if not source_commands.exists():
+        display.print("No commands source found", style="dim")
         return
     command_files = []
-    for command_path in sorted(config.source_commands.rglob("*")):
+    for command_path in sorted(source_commands.rglob("*")):
         if not command_path.is_file():
             continue
-        rel = command_path.relative_to(config.source_commands)
+        rel = command_path.relative_to(source_commands)
         if any(part in SKIP_PATTERNS for part in rel.parts):
             continue
-        command_files.append((command_path, rel))
+        if rel.as_posix() in command_list:
+            command_files.append((command_path, rel))
     if not command_files:
         display.print("No commands selected", style="dim")
         return
@@ -181,63 +180,22 @@ def sync_commands(config: RunConfig, display: Display) -> None:
     for command_path, rel in command_files:
         raw_content = command_path.read_text(encoding="utf-8")
         slug = rel.as_posix()
-        rows.append((slug, ", ".join(c.name for c in CLIENTS)))
-        for client in CLIENTS:
-            client.write_command(slug, raw_content, rel)
+        rows.append((slug, ", ".join(c.name for c in clients)))
+        for client in clients:
+            client.write_command(slug, raw_content, rel, store)
     display.table(("Command", "Clients"), rows)
 
 
-def _parse_structured_content(content: str, format: str) -> dict | list:
-    if not content.strip():
-        return {}
-    if format == "json":
-        return json.loads(content)
-    if format == "toml":
-        return tomli.loads(content)
-    if format == "yaml":
-        data = yaml.safe_load(content)
-        return data if isinstance(data, (dict, list)) else {}
-    raise ValueError(f"Unsupported format: {format}")
-
-
-def _flatten_structured_to_specs(file_path: Path, format: str, data: object) -> list[WriteSpec]:
-    specs: list[WriteSpec] = []
-
-    def walk(node: object, prefix: str) -> None:
-        if isinstance(node, dict):
-            if not node:
-                specs.append(WriteSpec(file_path=file_path, format=format, target=prefix or "/", value={}))
-                return
-            for key, value in node.items():
-                next_prefix = f"{prefix}/{escape_path_segment(str(key))}"
-                walk(value, next_prefix)
-            return
-        if isinstance(node, list):
-            specs.append(WriteSpec(file_path=file_path, format=format, target=prefix or "/", value=[]))
-            if not node:
-                return
-            for idx, value in enumerate(node):
-                next_prefix = f"{prefix}/{idx}"
-                walk(value, next_prefix)
-            return
-        specs.append(WriteSpec(file_path=file_path, format=format, target=prefix or "/", value=node))
-
-    walk(data, "")
-    return specs
-
-
-def sync_client_config(config: RunConfig, display: Display) -> None:
-    settings_path = config.source_client_config
-    if not settings_path.exists():
-        display.print("Client Config: skipping (~/.ai-sync/config/client-settings.yaml not found)", style="dim")
+def sync_client_config(
+    settings: dict,
+    clients: Sequence[Client],
+    store: StateStore,
+    display: Display,
+) -> None:
+    if not settings:
+        display.print("Client Config: skipping (no settings)", style="dim")
         return
     display.rule("Syncing Client Config")
-    try:
-        with open(settings_path, "r", encoding="utf-8") as f:
-            settings = yaml.safe_load(f) or {}
-    except (yaml.YAMLError, OSError) as exc:
-        display.print(f"Failed to load {settings_path}: {exc}", style="warning")
-        return
     errors = validate_client_settings(settings)
     if errors:
         display.panel("\n".join(errors), title="Invalid Client Config", style="error")
@@ -250,114 +208,99 @@ def sync_client_config(config: RunConfig, display: Display) -> None:
             style="error",
         )
     rows: list[tuple[str, ...]] = []
-    for client in CLIENTS:
-        client.sync_client_config(settings)
+    for client in clients:
+        client.sync_client_config(settings, store)
         rows.append((client.name, "OK"))
     display.table(("Client", "Status"), rows)
 
 
-def preflight(config: RunConfig, display: Display) -> dict:
-    manifest = load_manifest(config.source_mcp, display)
-    if config.overrides:
-        manifest = apply_overrides(manifest, config.overrides)
-    if not manifest:
-        return manifest
-    required_vars = collect_env_refs(manifest)
-    if not required_vars:
-        return manifest
-    env_tpl = config.source_env_template
-    if not env_tpl.exists():
-        names = ", ".join(sorted(required_vars))
-        raise RuntimeError(
-            f"MCP config references env vars ({names}) but {env_tpl} is missing. "
-            "Create the file with the required variables (use op:// refs for 1Password secrets)."
-        )
-    runtime_env = load_runtime_env_from_op(env_tpl, config.config_root)
-    missing = sorted(required_vars - runtime_env.keys())
-    if missing:
-        raise RuntimeError(
-            f"MCP config references env vars not defined in {env_tpl}: {', '.join(missing)}"
-        )
-    manifest = cast(dict, resolve_env_refs_in_obj(manifest, runtime_env))
-    return manifest
+def sync_instructions(
+    project_root: Path,
+    clients: Sequence[Client],
+    store: StateStore,
+    display: Display,
+) -> None:
+    instructions_path = project_root / ".ai-sync" / "instructions.md"
+    if not instructions_path.exists():
+        return
+    display.rule("Syncing Instructions")
+    content = instructions_path.read_text(encoding="utf-8")
+    if not content.strip():
+        return
+    for client in clients:
+        client.sync_instructions(content, store)
+    display.print(f"  Synced to {', '.join(c.name for c in clients)}", style="info")
 
 
-def execute(config: RunConfig, manifest: dict, display: Display) -> int:
-    display.print("")
-    display.rule("Starting Sync", style="info")
-    display.print(f"Source: {config.config_root}", style="info")
-    sync_agents(config, display)
-    sync_skills(config, display)
-    sync_commands(config, display)
-    sync_mcp_servers(manifest, display)
-    if config.options.install_settings:
-        sync_client_config(config, display)
-    display.print("")
-    display.panel("Sync complete", title="Done", style="success")
-    return 0
+def _parse_structured_content(content: str, fmt: str) -> dict | list:
+    if not content.strip():
+        return {}
+    if fmt == "json":
+        return json.loads(content)
+    if fmt == "toml":
+        return tomli.loads(content)
+    if fmt == "yaml":
+        data = yaml.safe_load(content)
+        return data if isinstance(data, (dict, list)) else {}
+    raise ValueError(f"Unsupported format: {fmt}")
 
 
-def run_sync(
+def _flatten_structured_to_specs(file_path: Path, fmt: str, data: object) -> list[WriteSpec]:
+    specs: list[WriteSpec] = []
+
+    def walk(node: object, prefix: str) -> None:
+        if isinstance(node, dict):
+            if not node:
+                specs.append(WriteSpec(file_path=file_path, format=fmt, target=prefix or "/", value={}))
+                return
+            for key, value in node.items():
+                next_prefix = f"{prefix}/{escape_path_segment(str(key))}"
+                walk(value, next_prefix)
+            return
+        if isinstance(node, list):
+            specs.append(WriteSpec(file_path=file_path, format=fmt, target=prefix or "/", value=[]))
+            if not node:
+                return
+            for idx, value in enumerate(node):
+                next_prefix = f"{prefix}/{idx}"
+                walk(value, next_prefix)
+            return
+        specs.append(WriteSpec(file_path=file_path, format=fmt, target=prefix or "/", value=node))
+
+    walk(data, "")
+    return specs
+
+
+def run_apply(
     *,
-    config_root: Path | None = None,
-    force: bool,
-    no_interactive: bool,
-    plain: bool,
-    overrides: Sequence[tuple[str, object]],
+    project_root: Path,
+    config_root: Path,
+    manifest: ProjectManifest,
+    mcp_manifest: dict,
+    secrets: dict,
     display: Display,
 ) -> int:
-    root = config_root or get_config_root()
-    versions_path = get_default_versions_path()
-    if force:
-        versions = detect_client_versions()
-        if not versions:
-            raise RuntimeError("No client versions detected; ensure codex/cursor/gemini CLIs are on PATH")
-        try:
-            versions_path.write_text(json.dumps(versions, indent=2) + "\n", encoding="utf-8")
-        except OSError as exc:
-            raise RuntimeError(
-                f"Failed to write version lock at {versions_path}: {exc}. "
-                "Run from a writable source checkout to update."
-            ) from exc
-        display.print(f"✓ Updated {versions_path}", style="success")
-    else:
-        ok, msg = check_client_versions(versions_path)
-        if not ok:
-            raise RuntimeError(msg)
-        if msg != "OK":
-            display.print(f"Warning: {msg}", style="warning")
+    display.print("")
+    display.rule("Starting Apply", style="info")
+    display.print(f"Project: {project_root}", style="info")
+    display.print(f"Registry: {config_root}", style="info")
 
-    source_prompts = root / "config" / "prompts"
-    source_skills = root / "config" / "skills"
-    source_commands = root / "config" / "commands"
-    source_mcp = root / "config"
-    source_client_config = root / "config" / "client-settings.yaml"
-    source_env_template = root / ".env.tpl"
+    clients = create_clients(project_root)
+    store = StateStore(project_root)
+    store.load()
 
-    agent_stems = sorted(p.stem for p in source_prompts.glob("*.md")) if source_prompts.exists() else []
-    skill_names = sorted(d.name for d in source_skills.iterdir() if d.is_dir() and (d / "SKILL.md").exists()) if source_skills.exists() else []
-    if no_interactive or plain:
-        options = SyncOptions(
-            agent_stems=frozenset(agent_stems),
-            skill_names=frozenset(skill_names),
-            install_settings=True,
-        )
-    else:
-        opts = run_interactive_prompts(display, agent_stems, skill_names)
-        if opts is None:
-            raise RuntimeError("Cancelled")
-        options = opts
+    sync_agents(config_root, manifest.agents, clients, store, display)
+    sync_skills(config_root, manifest.skills, clients, store, display)
+    sync_commands(config_root, manifest.commands, clients, store, display)
+    sync_mcp_servers(mcp_manifest, clients, secrets, store, display)
+    sync_client_config(manifest.settings, clients, store, display)
+    sync_instructions(project_root, clients, store, display)
 
-    config = RunConfig(
-        config_root=root,
-        source_prompts=source_prompts,
-        source_skills=source_skills,
-        source_commands=source_commands,
-        source_mcp=source_mcp,
-        source_client_config=source_client_config,
-        source_env_template=source_env_template,
-        overrides=overrides,
-        options=options,
-    )
-    manifest = preflight(config, display)
-    return execute(config, manifest, display)
+    store.save()
+
+    for client in clients:
+        client.post_apply()
+
+    display.print("")
+    display.panel("Apply complete", title="Done", style="success")
+    return 0

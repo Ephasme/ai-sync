@@ -1,4 +1,4 @@
-"""Pydantic models for manifest validation."""
+"""Pydantic models for MCP server manifest validation."""
 
 from __future__ import annotations
 
@@ -20,8 +20,6 @@ class ServerConfig(BaseModel):
     args: list[str] = Field(default_factory=list)
     url: str | None = None
     httpUrl: str | None = None
-    enabled: bool = True
-    clients: list[str] | None = None
     description: str | None = None
     trust: bool | None = None
     timeout_seconds: StrictInt | StrictFloat | None = None
@@ -54,10 +52,5 @@ class ServerConfig(BaseModel):
         return value
 
 
-class GlobalConfig(BaseModel):
-    instructions: str | None = None
-
-
 class MCPManifest(BaseModel):
-    global_: GlobalConfig = Field(default_factory=GlobalConfig, alias="global")
     servers: dict[str, ServerConfig] = Field(default_factory=dict)

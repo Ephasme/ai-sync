@@ -32,10 +32,9 @@ class _DeleteSentinel:
 DELETE = _DeleteSentinel()
 
 
-def track_write_blocks(specs: list[WriteSpec]) -> None:
+def track_write_blocks(specs: list[WriteSpec], store: StateStore) -> None:
     if not specs:
         return
-    store = StateStore()
     store.load()
 
     grouped: dict[Path, list[WriteSpec]] = {}

@@ -1,4 +1,4 @@
-"""Uninstall ai-sync managed changes using state."""
+"""Uninstall ai-sync managed changes from a project."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any
 
 import tomli
 import tomli_w
@@ -15,11 +14,11 @@ import yaml
 from .helpers import ensure_dir
 from .path_ops import delete_at_path, set_at_path
 from .state_store import StateStore
-from .track_write import DELETE, _is_full_file_target, marker_bounds
+from .track_write import _is_full_file_target, marker_bounds
 
 
-def run_uninstall(*, apply: bool) -> int:
-    store = StateStore()
+def run_uninstall(project_root: Path, *, apply: bool) -> int:
+    store = StateStore(project_root)
     store.load()
     entries = store.list_entries()
     if not entries:
@@ -29,19 +28,19 @@ def run_uninstall(*, apply: bool) -> int:
     grouped: dict[tuple[str, str], list[dict]] = {}
     for entry in entries:
         file_path = entry.get("file_path")
-        format = entry.get("format")
+        fmt = entry.get("format")
         target = entry.get("target")
         baseline = entry.get("baseline")
-        if not isinstance(file_path, str) or not isinstance(format, str) or not isinstance(target, str):
+        if not isinstance(file_path, str) or not isinstance(fmt, str) or not isinstance(target, str):
             continue
         if not isinstance(baseline, dict):
             continue
-        grouped.setdefault((file_path, format), []).append(entry)
+        grouped.setdefault((file_path, fmt), []).append(entry)
 
     did_change = False
-    for (file_path_str, format), file_entries in grouped.items():
+    for (file_path_str, fmt), file_entries in grouped.items():
         file_path = Path(file_path_str)
-        if format == "text":
+        if fmt == "text":
             content = ""
             if file_path.exists():
                 try:
@@ -81,9 +80,9 @@ def run_uninstall(*, apply: bool) -> int:
                     else:
                         ensure_dir(file_path.parent)
                         _write_atomic(file_path, content)
-        elif format in {"json", "toml", "yaml"}:
+        elif fmt in {"json", "toml", "yaml"}:
             raw = file_path.read_text(encoding="utf-8") if file_path.exists() else ""
-            data: object = _parse_structured(raw, format)
+            data: object = _parse_structured(raw, fmt)
             original = raw
             any_baseline = False
             for entry in file_entries:
@@ -99,7 +98,7 @@ def run_uninstall(*, apply: bool) -> int:
                             data = set_at_path(data, pointer, value)
                 else:
                     data = delete_at_path(data, pointer)
-            new_content = _dump_structured(data, format)
+            new_content = _dump_structured(data, fmt)
             if new_content != original:
                 did_change = True
                 if apply:
@@ -109,7 +108,7 @@ def run_uninstall(*, apply: bool) -> int:
                         ensure_dir(file_path.parent)
                         _write_atomic(file_path, new_content)
         else:
-            print(f"Skipping unsupported format in state: {format}")
+            print(f"Skipping unsupported format in state: {fmt}")
 
     if apply:
         store.delete_state()
@@ -140,38 +139,38 @@ def remove_marker_block(content: str, marker_id: str, file_path: Path) -> str:
     return cleaned.strip() + "\n" if cleaned.strip() else ""
 
 
-def _parse_structured(raw: str, format: str) -> dict | list:
+def _parse_structured(raw: str, fmt: str) -> dict | list:
     if not raw.strip():
         return {}
-    if format == "json":
+    if fmt == "json":
         try:
             data = json.loads(raw)
             return data if isinstance(data, (dict, list)) else {}
         except json.JSONDecodeError:
             return {}
-    if format == "toml":
+    if fmt == "toml":
         try:
             data = tomli.loads(raw)
             return data if isinstance(data, dict) else {}
         except tomli.TOMLDecodeError:
             return {}
-    if format == "yaml":
+    if fmt == "yaml":
         try:
             data = yaml.safe_load(raw)
             return data if isinstance(data, (dict, list)) else {}
         except yaml.YAMLError:
             return {}
-    raise ValueError(f"Unsupported format: {format}")
+    raise ValueError(f"Unsupported format: {fmt}")
 
 
-def _dump_structured(data: object, format: str) -> str:
-    if format == "json":
+def _dump_structured(data: object, fmt: str) -> str:
+    if fmt == "json":
         return json.dumps(data, indent=2)
-    if format == "toml":
+    if fmt == "toml":
         return tomli_w.dumps(data if isinstance(data, dict) else {})
-    if format == "yaml":
+    if fmt == "yaml":
         return yaml.safe_dump(data, sort_keys=False).rstrip() + "\n"
-    raise ValueError(f"Unsupported format: {format}")
+    raise ValueError(f"Unsupported format: {fmt}")
 
 
 def _deserialize_value(blob: str) -> object:
@@ -182,7 +181,6 @@ def _deserialize_value(blob: str) -> object:
             return yaml.safe_load(blob)
         except yaml.YAMLError:
             return blob
-
 
 
 def _is_empty_structured(data: object) -> bool:
