@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from jsonpointer import JsonPointer, JsonPointerException
 
-
 # ---------------------------------------------------------------------------
 # Path parsing / escaping
 # ---------------------------------------------------------------------------

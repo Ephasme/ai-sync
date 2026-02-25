@@ -81,7 +81,10 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
             entry["description"] = str(server["description"])
         oauth_cfg = server.get("oauth", {})
         if oauth_cfg.get("enabled") or oauth_cfg.get("authorizationUrl"):
-            oauth_src = secret_srv.get("oauth") or secret_srv.get("auth") or server.get("oauth") or server.get("auth") or {}
+            oauth_src = (
+                secret_srv.get("oauth") or secret_srv.get("auth")
+                or server.get("oauth") or server.get("auth") or {}
+            )
             client_id = (oauth_src.get("clientId") or "").strip()
             client_secret = (oauth_src.get("clientSecret") or "").strip()
             scopes = oauth_cfg.get("scopes") or oauth_src.get("scopes") or []

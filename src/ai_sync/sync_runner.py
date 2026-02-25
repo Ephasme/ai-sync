@@ -14,14 +14,14 @@ from ai_sync.display import Display
 from ai_sync.helpers import (
     ensure_dir,
     extract_description,
-    validate_client_settings,
     to_kebab_case,
+    validate_client_settings,
 )
 from ai_sync.mcp_sync import sync_mcp_servers
+from ai_sync.path_ops import escape_path_segment
 from ai_sync.project import ProjectManifest
 from ai_sync.state_store import StateStore
 from ai_sync.track_write import DELETE, WriteSpec, track_write_blocks
-from ai_sync.path_ops import escape_path_segment
 
 GENERIC_METADATA_KEYS = {"slug", "name", "description"}
 SKIP_PATTERNS = {".venv", "node_modules", "__pycache__", ".git", ".DS_Store"}

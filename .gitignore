@@ -40,3 +40,11 @@ node_modules/
 .idea/
 .vscode/
 .DS_Store
+
+# ai-sync managed entries
+.ai-sync.yaml
+.cursor/*
+.codex/*
+.gemini/*
+.ai-sync.local.yaml
+.ai-sync/state/

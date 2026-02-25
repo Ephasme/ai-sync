@@ -10,7 +10,6 @@ from pathlib import Path
 
 from .helpers import ensure_dir
 
-
 STATE_VERSION = 1
 
 

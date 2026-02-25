@@ -6,9 +6,7 @@ import os
 from pathlib import Path
 
 import tomli as tomllib
-
 import tomli_w
-
 
 DEFAULT_SECRET_PROVIDER = "1password"
 CONFIG_FILE_NAME = "config.toml"

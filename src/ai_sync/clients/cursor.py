@@ -87,7 +87,10 @@ is_background: {"true" if meta.get("is_background", False) else "false"}
             entry["description"] = str(server["description"])
         oauth_cfg = server.get("oauth", {})
         if oauth_cfg.get("enabled") or oauth_cfg.get("authorizationUrl"):
-            oauth_src = secret_srv.get("oauth") or secret_srv.get("auth") or server.get("oauth") or server.get("auth") or {}
+            oauth_src = (
+                secret_srv.get("oauth") or secret_srv.get("auth")
+                or server.get("oauth") or server.get("auth") or {}
+            )
             client_id = (oauth_src.get("clientId") or "").strip()
             client_secret = (oauth_src.get("clientSecret") or "").strip()
             scopes = oauth_cfg.get("scopes") or oauth_src.get("scopes") or []
@@ -151,7 +154,10 @@ is_background: {"true" if meta.get("is_background", False) else "false"}
     def _build_client_config(self, settings: dict) -> dict:
         mode = settings.get("mode") or "normal"
         if mode in {"normal", "yolo"}:
-            return {"permissions": {"allow": ["Shell(*)", "Read(*)", "Write(*)", "WebFetch(*)", "Mcp(*:*)"], "deny": []}}
+            return {"permissions": {
+                "allow": ["Shell(*)", "Read(*)", "Write(*)", "WebFetch(*)", "Mcp(*:*)"],
+                "deny": [],
+            }}
         return {"permissions": {"allow": [], "deny": []}}
 
     def sync_client_config(self, settings: dict, store: StateStore) -> None:

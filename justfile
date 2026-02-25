@@ -1,5 +1,7 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
+venv := ".venv/bin"
+
 default:
     @just --list
 
@@ -10,17 +12,23 @@ lock:
     poetry lock
 
 test:
-    poetry run pytest
+    {{venv}}/pytest
 
 typecheck:
-    poetry run pyright
+    {{venv}}/pyright
+
+lint:
+    {{venv}}/ruff check src/
+
+fix:
+    {{venv}}/ruff check --fix src/
 
 release version:
     ./scripts/release_checks.sh {{version}}
     poetry lock
     poetry version {{version}}
     just install
-    poetry run pytest
+    just test
     git add pyproject.toml poetry.lock
     git commit -m "release: v{{version}}"
     git tag -a v{{version}} -m "v{{version}}"

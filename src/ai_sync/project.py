@@ -14,7 +14,9 @@ class ProjectManifest(BaseModel):
     agents: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     commands: list[str] = Field(default_factory=list)
-    mcp_servers: list[str] = Field(default_factory=list, validation_alias="mcp-servers", serialization_alias="mcp-servers")
+    mcp_servers: list[str] = Field(
+        default_factory=list, validation_alias="mcp-servers", serialization_alias="mcp-servers"
+    )
     settings: dict[str, Any] = Field(default_factory=dict)
 
 
