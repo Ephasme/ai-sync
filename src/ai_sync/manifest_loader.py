@@ -33,11 +33,14 @@ def load_manifest(mcp_root: Path, display: Display) -> dict:
 
 
 def load_and_filter_mcp(
-    config_root: Path,
+    repo_roots: list[Path],
     enabled_server_ids: list[str],
     display: Display,
 ) -> dict:
-    manifest = load_manifest(config_root / "config", display)
-    servers = manifest.get("servers") or {}
-    filtered = {sid: srv for sid, srv in servers.items() if sid in enabled_server_ids}
+    merged_servers: dict = {}
+    for repo_root in repo_roots:
+        manifest = load_manifest(repo_root, display)
+        servers = manifest.get("servers") or {}
+        merged_servers.update(servers)
+    filtered = {sid: srv for sid, srv in merged_servers.items() if sid in enabled_server_ids}
     return filtered

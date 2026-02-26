@@ -51,53 +51,62 @@ def load_prompt_metadata(prompt_path: Path, content: str, display: Display) -> d
 
 
 def sync_agents(
-    config_root: Path,
+    repo_roots: list[Path],
     agent_list: list[str],
     clients: Sequence[Client],
     store: StateStore,
     display: Display,
 ) -> None:
     display.rule("Syncing Agents")
-    source_prompts = config_root / "config" / "prompts"
-    if not source_prompts.exists():
-        display.print("No agents source found", style="dim")
-        return
-    prompts = sorted(source_prompts.glob("*.md"))
-    prompts = [p for p in prompts if p.stem in agent_list]
-    if not prompts:
+    if not agent_list:
         display.print("No agents selected", style="dim")
         return
 
     rows: list[tuple[str, ...]] = []
-    for prompt_path in prompts:
+    for agent_name in agent_list:
+        prompt_path: Path | None = None
+        for repo_root in repo_roots:
+            candidate = repo_root / "prompts" / f"{agent_name}.md"
+            if candidate.exists():
+                prompt_path = candidate
+        if prompt_path is None:
+            display.print(f"Agent {agent_name!r} not found in any repo", style="warning")
+            continue
         raw_content = prompt_path.read_text(encoding="utf-8")
         meta = load_prompt_metadata(prompt_path, raw_content, display)
         slug = meta.get("slug", to_kebab_case(prompt_path.stem))
-        rows.append((prompt_path.stem, to_kebab_case(prompt_path.stem), ", ".join(c.name for c in clients)))
+        rows.append((agent_name, to_kebab_case(agent_name), ", ".join(c.name for c in clients)))
         for client in clients:
             client.write_agent(slug, meta, raw_content, prompt_path, store)
-    display.table(("Agent", "Slug", "Clients"), rows)
+    if rows:
+        display.table(("Agent", "Slug", "Clients"), rows)
+    else:
+        display.print("No agents selected", style="dim")
 
 
 def sync_skills(
-    config_root: Path,
+    repo_roots: list[Path],
     skill_list: list[str],
     clients: Sequence[Client],
     store: StateStore,
     display: Display,
 ) -> None:
     display.rule("Syncing Skills")
-    source_skills = config_root / "config" / "skills"
-    if not source_skills.exists():
-        display.print("No skills source found", style="dim")
-        return
-    skill_dirs = sorted(d for d in source_skills.iterdir() if d.is_dir() and (d / "SKILL.md").exists())
-    skill_dirs = [d for d in skill_dirs if d.name in skill_list]
-    if not skill_dirs:
+    if not skill_list:
         display.print("No skills selected", style="dim")
         return
+
     rows: list[tuple[str, ...]] = []
-    for skill_dir in skill_dirs:
+    for skill_name in skill_list:
+        resolved_skill_dir: Path | None = None
+        for repo_root in repo_roots:
+            candidate = repo_root / "skills" / skill_name
+            if candidate.is_dir() and (candidate / "SKILL.md").exists():
+                resolved_skill_dir = candidate
+        if resolved_skill_dir is None:
+            display.print(f"Skill {skill_name!r} not found in any repo", style="warning")
+            continue
+        skill_dir = resolved_skill_dir
         kebab_name = to_kebab_case(skill_dir.name)
         rows.append((skill_dir.name, kebab_name, ", ".join(c.name for c in clients)))
         for client in clients:
@@ -149,41 +158,43 @@ def sync_skills(
                 specs.extend(leaf_specs)
             if specs:
                 track_write_blocks(specs, store)
-    display.table(("Skill", "Slug", "Clients"), rows)
+    if rows:
+        display.table(("Skill", "Slug", "Clients"), rows)
+    else:
+        display.print("No skills selected", style="dim")
 
 
 def sync_commands(
-    config_root: Path,
+    repo_roots: list[Path],
     command_list: list[str],
     clients: Sequence[Client],
     store: StateStore,
     display: Display,
 ) -> None:
     display.rule("Syncing Commands")
-    source_commands = config_root / "config" / "commands"
-    if not source_commands.exists():
-        display.print("No commands source found", style="dim")
-        return
-    command_files = []
-    for command_path in sorted(source_commands.rglob("*")):
-        if not command_path.is_file():
-            continue
-        rel = command_path.relative_to(source_commands)
-        if any(part in SKIP_PATTERNS for part in rel.parts):
-            continue
-        if rel.as_posix() in command_list:
-            command_files.append((command_path, rel))
-    if not command_files:
+    if not command_list:
         display.print("No commands selected", style="dim")
         return
+
     rows: list[tuple[str, ...]] = []
-    for command_path, rel in command_files:
+    for rel_posix in command_list:
+        command_path: Path | None = None
+        for repo_root in repo_roots:
+            candidate = repo_root / "commands" / rel_posix
+            if candidate.is_file():
+                command_path = candidate
+        if command_path is None:
+            display.print(f"Command {rel_posix!r} not found in any repo", style="warning")
+            continue
         raw_content = command_path.read_text(encoding="utf-8")
-        slug = rel.as_posix()
-        rows.append((slug, ", ".join(c.name for c in clients)))
+        rel = Path(rel_posix)
+        rows.append((rel_posix, ", ".join(c.name for c in clients)))
         for client in clients:
-            client.write_command(slug, raw_content, rel, store)
-    display.table(("Command", "Clients"), rows)
+            client.write_command(rel_posix, raw_content, rel, store)
+    if rows:
+        display.table(("Command", "Clients"), rows)
+    else:
+        display.print("No commands selected", style="dim")
 
 
 def sync_client_config(
@@ -274,7 +285,7 @@ def _flatten_structured_to_specs(file_path: Path, fmt: str, data: object) -> lis
 def run_apply(
     *,
     project_root: Path,
-    config_root: Path,
+    repo_roots: list[Path],
     manifest: ProjectManifest,
     mcp_manifest: dict,
     secrets: dict,
@@ -283,15 +294,18 @@ def run_apply(
     display.print("")
     display.rule("Starting Apply", style="info")
     display.print(f"Project: {project_root}", style="info")
-    display.print(f"Registry: {config_root}", style="info")
+    display.print(
+        f"Repos ({len(repo_roots)}): {', '.join(r.name for r in repo_roots)}",
+        style="info",
+    )
 
     clients = create_clients(project_root)
     store = StateStore(project_root)
     store.load()
 
-    sync_agents(config_root, manifest.agents, clients, store, display)
-    sync_skills(config_root, manifest.skills, clients, store, display)
-    sync_commands(config_root, manifest.commands, clients, store, display)
+    sync_agents(repo_roots, manifest.agents, clients, store, display)
+    sync_skills(repo_roots, manifest.skills, clients, store, display)
+    sync_commands(repo_roots, manifest.commands, clients, store, display)
     sync_mcp_servers(mcp_manifest, clients, secrets, store, display)
     sync_client_config(manifest.settings, clients, store, display)
     sync_instructions(project_root, clients, store, display)

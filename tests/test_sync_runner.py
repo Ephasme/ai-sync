@@ -63,16 +63,17 @@ class DummyClient(Client):
         self.calls.append(f"sync_client_config:{self._name}")
 
 
-def _make_config_root(tmp_path: Path) -> Path:
-    root = tmp_path / "root"
-    (root / "config" / "prompts").mkdir(parents=True)
-    (root / "config" / "skills" / "skill-one").mkdir(parents=True)
-    (root / "config" / "commands").mkdir(parents=True)
+def _make_repo_root(tmp_path: Path) -> Path:
+    """Create a single repo root in the new flat layout (no config/ subdir)."""
+    root = tmp_path / "repo"
+    (root / "prompts").mkdir(parents=True)
+    (root / "skills" / "skill-one").mkdir(parents=True)
+    (root / "commands").mkdir(parents=True)
     (root / ".env.tpl").write_text("TOKEN=abc\n", encoding="utf-8")
-    (root / "config" / "prompts" / "agent.md").write_text("## Task\nDo thing\n", encoding="utf-8")
-    (root / "config" / "skills" / "skill-one" / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
-    (root / "config" / "commands" / "shortcut.md").write_text("Do a thing\n", encoding="utf-8")
-    (root / "config" / "mcp-servers.yaml").write_text(
+    (root / "prompts" / "agent.md").write_text("## Task\nDo thing\n", encoding="utf-8")
+    (root / "skills" / "skill-one" / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
+    (root / "commands" / "shortcut.md").write_text("Do a thing\n", encoding="utf-8")
+    (root / "mcp-servers.yaml").write_text(
         "servers:\n  srv:\n    method: stdio\n    command: npx\n    env:\n      TOKEN: \"$TOKEN\"\n",
         encoding="utf-8",
     )
@@ -80,7 +81,7 @@ def _make_config_root(tmp_path: Path) -> Path:
 
 
 def test_run_apply_syncs_agents_and_mcp(monkeypatch, tmp_path: Path) -> None:
-    root = _make_config_root(tmp_path)
+    repo_root = _make_repo_root(tmp_path)
     project_root = tmp_path / "project"
     project_root.mkdir()
     (project_root / ".ai-sync.yaml").write_text("agents: [agent]\nskills: [skill-one]\n", encoding="utf-8")
@@ -95,7 +96,7 @@ def test_run_apply_syncs_agents_and_mcp(monkeypatch, tmp_path: Path) -> None:
 
     result = sync_runner.run_apply(
         project_root=project_root,
-        config_root=root,
+        repo_roots=[repo_root],
         manifest=manifest,
         mcp_manifest=mcp_manifest,
         secrets=secrets,
@@ -107,8 +108,8 @@ def test_run_apply_syncs_agents_and_mcp(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_sync_skills_copies_root_files(tmp_path: Path, monkeypatch) -> None:
-    root = tmp_path / "root"
-    skill_root = root / "config" / "skills" / "skill-one"
+    repo_root = tmp_path / "repo"
+    skill_root = repo_root / "skills" / "skill-one"
     skill_root.mkdir(parents=True)
     (skill_root / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
     (skill_root / "reference.md").write_text("ref\n", encoding="utf-8")
@@ -120,14 +121,14 @@ def test_sync_skills_copies_root_files(tmp_path: Path, monkeypatch) -> None:
     client = DummyClient("codex", project_root, tmp_path, calls)
     store = StateStore(project_root)
 
-    sync_runner.sync_skills(root, ["skill-one"], [client], store, display)
+    sync_runner.sync_skills([repo_root], ["skill-one"], [client], store, display)
     target = client.get_skills_dir() / "skill-one" / "reference.md"
     assert target.exists()
 
 
 def test_sync_commands_copies_files(tmp_path: Path, monkeypatch) -> None:
-    root = tmp_path / "root"
-    commands_root = root / "config" / "commands"
+    repo_root = tmp_path / "repo"
+    commands_root = repo_root / "commands"
     commands_root.mkdir(parents=True)
     (commands_root / "shortcut.md").write_text("Do a thing\n", encoding="utf-8")
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -138,7 +139,30 @@ def test_sync_commands_copies_files(tmp_path: Path, monkeypatch) -> None:
     client = DummyClient("codex", project_root, tmp_path, calls)
     store = StateStore(project_root)
 
-    sync_runner.sync_commands(root, ["shortcut.md"], [client], store, display)
+    sync_runner.sync_commands([repo_root], ["shortcut.md"], [client], store, display)
     target = client.config_dir / "commands" / "shortcut.md"
     assert target.exists()
     assert "write_command:codex:shortcut.md" in calls
+
+
+def test_sync_agents_last_repo_wins(tmp_path: Path, monkeypatch) -> None:
+    repo_a = tmp_path / "repo-a"
+    (repo_a / "prompts").mkdir(parents=True)
+    (repo_a / "prompts" / "agent.md").write_text("## From A\n", encoding="utf-8")
+
+    repo_b = tmp_path / "repo-b"
+    (repo_b / "prompts").mkdir(parents=True)
+    (repo_b / "prompts" / "agent.md").write_text("## From B\n", encoding="utf-8")
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    display = FakeDisplay()
+    calls: list[str] = []
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    client = DummyClient("codex", project_root, tmp_path, calls)
+    store = StateStore(project_root)
+
+    sync_runner.sync_agents([repo_a, repo_b], ["agent"], [client], store, display)
+
+    written = client.get_agents_dir() / "agent" / "prompt.md"
+    assert written.read_text(encoding="utf-8") == "## From B\n"

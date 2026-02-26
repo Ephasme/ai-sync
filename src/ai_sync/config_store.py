@@ -23,10 +23,7 @@ def get_config_path(config_root: Path | None = None) -> Path:
 
 def ensure_layout(config_root: Path | None = None) -> Path:
     root = config_root or get_config_root()
-    (root / "config").mkdir(parents=True, exist_ok=True)
-    (root / "config" / "prompts").mkdir(parents=True, exist_ok=True)
-    (root / "config" / "skills").mkdir(parents=True, exist_ok=True)
-    (root / "config" / "commands").mkdir(parents=True, exist_ok=True)
+    (root / "repos").mkdir(parents=True, exist_ok=True)
     (root / "cache").mkdir(parents=True, exist_ok=True)
     return root
 

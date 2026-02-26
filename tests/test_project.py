@@ -84,45 +84,70 @@ def test_find_project_root_returns_none(tmp_path: Path) -> None:
 
 
 def test_load_defaults_missing(tmp_path: Path) -> None:
-    result = load_defaults(tmp_path)
+    result = load_defaults([])
     assert result == {}
 
 
 def test_load_defaults_present(tmp_path: Path) -> None:
-    defaults_dir = tmp_path / "config"
-    defaults_dir.mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
     defaults = {"agents": ["a1"], "settings": {"mode": "normal"}}
-    (defaults_dir / "defaults.yaml").write_text(yaml.safe_dump(defaults))
+    (repo / "defaults.yaml").write_text(yaml.safe_dump(defaults))
 
-    result = load_defaults(tmp_path)
+    result = load_defaults([repo])
     assert result["agents"] == ["a1"]
 
 
+def test_load_defaults_last_repo_wins(tmp_path: Path) -> None:
+    repo_a = tmp_path / "repo-a"
+    repo_a.mkdir()
+    (repo_a / "defaults.yaml").write_text(yaml.safe_dump({"agents": ["from-a"]}))
+    repo_b = tmp_path / "repo-b"
+    repo_b.mkdir()
+    (repo_b / "defaults.yaml").write_text(yaml.safe_dump({"agents": ["from-b"]}))
+
+    result = load_defaults([repo_a, repo_b])
+    assert result["agents"] == ["from-b"]
+
+
 def test_validate_against_registry(tmp_path: Path) -> None:
-    config_root = tmp_path / "registry"
-    prompts_dir = config_root / "config" / "prompts"
+    repo = tmp_path / "repo"
+    prompts_dir = repo / "prompts"
     prompts_dir.mkdir(parents=True)
     (prompts_dir / "agent_a.md").write_text("content")
 
-    skills_dir = config_root / "config" / "skills" / "skill-a"
+    skills_dir = repo / "skills" / "skill-a"
     skills_dir.mkdir(parents=True)
     (skills_dir / "SKILL.md").write_text("content")
 
-    mcp_dir = config_root / "config"
-    (mcp_dir / "mcp-servers.yaml").write_text(yaml.safe_dump({"servers": {"srv1": {"method": "stdio", "command": "x"}}}))
+    (repo / "mcp-servers.yaml").write_text(yaml.safe_dump({"servers": {"srv1": {"method": "stdio", "command": "x"}}}))
 
     manifest = ProjectManifest(
         agents=["agent_a", "agent_b"],
         skills=["skill-a", "skill-x"],
         mcp_servers=["srv1", "srv2"],
     )
-    warnings = validate_against_registry(manifest, config_root)
+    warnings = validate_against_registry(manifest, [repo])
     assert any("agent_b" in w for w in warnings)
     assert any("skill-x" in w for w in warnings)
     assert any("srv2" in w for w in warnings)
     assert not any("agent_a" in w for w in warnings)
     assert not any("skill-a" in w for w in warnings)
     assert not any("srv1" in w for w in warnings)
+
+
+def test_validate_against_registry_multi_repo(tmp_path: Path) -> None:
+    repo_a = tmp_path / "repo-a"
+    (repo_a / "prompts").mkdir(parents=True)
+    (repo_a / "prompts" / "agent_a.md").write_text("content")
+
+    repo_b = tmp_path / "repo-b"
+    (repo_b / "skills" / "skill-b").mkdir(parents=True)
+    (repo_b / "skills" / "skill-b" / "SKILL.md").write_text("content")
+
+    manifest = ProjectManifest(agents=["agent_a"], skills=["skill-b"])
+    warnings = validate_against_registry(manifest, [repo_a, repo_b])
+    assert warnings == []
 
 
 def test_no_ai_sync_yaml_raises(tmp_path: Path) -> None:

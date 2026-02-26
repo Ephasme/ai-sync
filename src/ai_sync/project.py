@@ -92,52 +92,60 @@ def find_project_root(start: Path | None = None) -> Path | None:
         current = parent
 
 
-def load_defaults(config_root: Path) -> dict[str, Any]:
-    defaults_path = config_root / "config" / "defaults.yaml"
-    if not defaults_path.exists():
-        return {}
-    return _load_yaml_file(defaults_path)
+def load_defaults(repo_roots: list[Path]) -> dict[str, Any]:
+    """Return defaults from the last (highest-priority) repo that has defaults.yaml."""
+    for repo_root in reversed(repo_roots):
+        defaults_path = repo_root / "defaults.yaml"
+        if defaults_path.exists():
+            return _load_yaml_file(defaults_path)
+    return {}
 
 
 def validate_against_registry(
-    manifest: ProjectManifest, config_root: Path
+    manifest: ProjectManifest, repo_roots: list[Path]
 ) -> list[str]:
+    available_agents: set[str] = set()
+    available_skills: set[str] = set()
+    available_commands: set[str] = set()
+    available_servers: set[str] = set()
+
+    for repo_root in repo_roots:
+        prompts_dir = repo_root / "prompts"
+        if prompts_dir.exists():
+            available_agents.update(p.stem for p in prompts_dir.glob("*.md"))
+
+        skills_dir = repo_root / "skills"
+        if skills_dir.exists():
+            available_skills.update(
+                d.name for d in skills_dir.iterdir() if d.is_dir() and (d / "SKILL.md").exists()
+            )
+
+        commands_dir = repo_root / "commands"
+        if commands_dir.exists():
+            for cmd_path in commands_dir.rglob("*"):
+                if cmd_path.is_file():
+                    available_commands.add(cmd_path.relative_to(commands_dir).as_posix())
+
+        mcp_path = repo_root / "mcp-servers.yaml"
+        if mcp_path.exists():
+            try:
+                data = _load_yaml_file(mcp_path)
+                available_servers.update((data.get("servers") or {}).keys())
+            except RuntimeError:
+                pass
+
     warnings: list[str] = []
-    prompts_dir = config_root / "config" / "prompts"
-    if prompts_dir.exists():
-        available_agents = {p.stem for p in prompts_dir.glob("*.md")}
-        for agent in manifest.agents:
-            if agent not in available_agents:
-                warnings.append(f"Unknown agent: {agent!r}")
-
-    skills_dir = config_root / "config" / "skills"
-    if skills_dir.exists():
-        available_skills = {
-            d.name for d in skills_dir.iterdir() if d.is_dir() and (d / "SKILL.md").exists()
-        }
-        for skill in manifest.skills:
-            if skill not in available_skills:
-                warnings.append(f"Unknown skill: {skill!r}")
-
-    commands_dir = config_root / "config" / "commands"
-    if commands_dir.exists():
-        available_commands: set[str] = set()
-        for cmd_path in commands_dir.rglob("*"):
-            if cmd_path.is_file():
-                available_commands.add(cmd_path.relative_to(commands_dir).as_posix())
-        for command in manifest.commands:
-            if command not in available_commands:
-                warnings.append(f"Unknown command: {command!r}")
-
-    mcp_path = config_root / "config" / "mcp-servers.yaml"
-    if mcp_path.exists():
-        try:
-            data = _load_yaml_file(mcp_path)
-            available_servers = set((data.get("servers") or {}).keys())
-        except RuntimeError:
-            available_servers = set()
-        for server in manifest.mcp_servers:
-            if server not in available_servers:
-                warnings.append(f"Unknown MCP server: {server!r}")
+    for agent in manifest.agents:
+        if agent not in available_agents:
+            warnings.append(f"Unknown agent: {agent!r}")
+    for skill in manifest.skills:
+        if skill not in available_skills:
+            warnings.append(f"Unknown skill: {skill!r}")
+    for command in manifest.commands:
+        if command not in available_commands:
+            warnings.append(f"Unknown command: {command!r}")
+    for server in manifest.mcp_servers:
+        if server not in available_servers:
+            warnings.append(f"Unknown MCP server: {server!r}")
 
     return warnings
