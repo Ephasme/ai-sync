@@ -7,6 +7,7 @@ default:
 
 install:
     poetry sync --with dev
+    {{venv}}/pre-commit install
 
 lock:
     poetry lock
