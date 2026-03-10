@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Mapping
 
 import yaml
 from pydantic import ValidationError
@@ -10,6 +11,8 @@ from pydantic import ValidationError
 from .display import Display
 from .helpers import validate_servers_yaml
 from .models import MCPManifest
+from .project import split_scoped_ref
+from .source_resolver import ResolvedSource
 
 
 def load_manifest(mcp_root: Path, display: Display) -> dict:
@@ -33,14 +36,23 @@ def load_manifest(mcp_root: Path, display: Display) -> dict:
 
 
 def load_and_filter_mcp(
-    repo_roots: list[Path],
-    enabled_server_ids: list[str],
+    resolved_sources: Mapping[str, ResolvedSource],
+    enabled_server_refs: list[str],
     display: Display,
 ) -> dict:
-    merged_servers: dict = {}
-    for repo_root in repo_roots:
-        manifest = load_manifest(repo_root, display)
+    selected: dict = {}
+    for ref in enabled_server_refs:
+        alias, server_id = split_scoped_ref(ref)
+        if alias not in resolved_sources:
+            raise RuntimeError(f"Unknown source alias {alias!r} in MCP reference {ref!r}")
+        manifest = load_manifest(resolved_sources[alias].root, display)
         servers = manifest.get("servers") or {}
-        merged_servers.update(servers)
-    filtered = {sid: srv for sid, srv in merged_servers.items() if sid in enabled_server_ids}
-    return filtered
+        if server_id not in servers:
+            raise RuntimeError(f"MCP server {ref!r} was not found in source {alias!r}")
+        if server_id in selected:
+            raise RuntimeError(
+                f"MCP server collision for output id {server_id!r}. "
+                "Select only one source for this server id in V1."
+            )
+        selected[server_id] = servers[server_id]
+    return selected

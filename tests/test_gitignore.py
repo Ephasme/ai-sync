@@ -19,7 +19,7 @@ def test_full_coverage(tmp_path: Path) -> None:
 
 def test_parent_dir_covers_child(tmp_path: Path) -> None:
     gitignore = tmp_path / ".gitignore"
-    gitignore.write_text(".cursor/\n.codex/\n.gemini/\n.ai-sync.local.yaml\n.ai-sync/\n.env.ai-sync\n")
+    gitignore.write_text(".cursor/\n.codex/\n.gemini/\n.ai-sync/\n.env.ai-sync\n")
     uncovered = check_gitignore(tmp_path)
     assert uncovered == []
 

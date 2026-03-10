@@ -1,157 +1,90 @@
-"""Tests for project manifest loading and resolution."""
+"""Tests for scoped project manifests."""
 
 from pathlib import Path
 
+import pytest
 import yaml
 
-from ai_sync.project import (
-    ProjectManifest,
-    _deep_merge_settings,
-    find_project_root,
-    load_defaults,
-    resolve_project_manifest,
-    validate_against_registry,
-)
+from ai_sync.project import ProjectManifest, find_project_root, manifest_fingerprint, resolve_project_manifest, split_scoped_ref
 
 
 def test_project_manifest_from_yaml(tmp_path: Path) -> None:
     data = {
-        "agents": ["a1", "a2"],
-        "skills": ["s1"],
-        "commands": ["c1.md"],
-        "mcp-servers": ["srv1"],
+        "sources": {
+            "company": {"source": "github.com/acme/company-ai-sync", "version": "v1.2.0"},
+            "frontend": {"source": "../frontend-ai-sync"},
+        },
+        "agents": ["company/agent-a"],
+        "skills": ["frontend/skill-a"],
+        "commands": ["company/c1.md"],
+        "mcp-servers": ["company/srv1"],
         "settings": {"mode": "normal"},
     }
-    ai_sync_yaml = tmp_path / ".ai-sync.yaml"
-    ai_sync_yaml.write_text(yaml.safe_dump(data))
+    (tmp_path / ".ai-sync.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")
 
     manifest = resolve_project_manifest(tmp_path)
-    assert manifest.agents == ["a1", "a2"]
-    assert manifest.skills == ["s1"]
-    assert manifest.commands == ["c1.md"]
-    assert manifest.mcp_servers == ["srv1"]
+    assert sorted(manifest.sources) == ["company", "frontend"]
+    assert manifest.agents == ["company/agent-a"]
+    assert manifest.skills == ["frontend/skill-a"]
+    assert manifest.commands == ["company/c1.md"]
+    assert manifest.mcp_servers == ["company/srv1"]
     assert manifest.settings == {"mode": "normal"}
 
 
-def test_local_replaces_list_keys(tmp_path: Path) -> None:
-    base = {"agents": ["a1", "a2"], "skills": ["s1"], "mcp-servers": ["srv1"]}
-    local = {"agents": ["a3"]}
-
-    (tmp_path / ".ai-sync.yaml").write_text(yaml.safe_dump(base))
-    (tmp_path / ".ai-sync.local.yaml").write_text(yaml.safe_dump(local))
-
-    manifest = resolve_project_manifest(tmp_path)
-    assert manifest.agents == ["a3"]
-    assert manifest.skills == ["s1"]
-    assert manifest.mcp_servers == ["srv1"]
+def test_project_manifest_requires_scoped_refs() -> None:
+    with pytest.raises(ValueError, match="Scoped reference"):
+        ProjectManifest(
+            sources={"company": {"source": "github.com/acme/company-ai-sync", "version": "v1.2.0"}},
+            agents=["agent-a"],
+        )
 
 
-def test_local_deep_merges_settings(tmp_path: Path) -> None:
-    base = {"agents": [], "settings": {"mode": "normal", "experimental": True, "tools": {"sandbox": False}}}
-    local = {"settings": {"mode": "yolo", "tools": {"sandbox": True}}}
-
-    (tmp_path / ".ai-sync.yaml").write_text(yaml.safe_dump(base))
-    (tmp_path / ".ai-sync.local.yaml").write_text(yaml.safe_dump(local))
-
-    manifest = resolve_project_manifest(tmp_path)
-    assert manifest.settings["mode"] == "yolo"
-    assert manifest.settings["experimental"] is True
-    assert manifest.settings["tools"]["sandbox"] is True
+def test_project_manifest_requires_known_alias() -> None:
+    with pytest.raises(ValueError, match="Unknown source alias"):
+        ProjectManifest(
+            sources={"company": {"source": "github.com/acme/company-ai-sync", "version": "v1.2.0"}},
+            agents=["frontend/agent-a"],
+        )
 
 
-def test_settings_null_deletes_key() -> None:
-    base = {"mode": "normal", "experimental": True}
-    overlay = {"experimental": None}
-    result = _deep_merge_settings(base, overlay)
-    assert "experimental" not in result
-    assert result["mode"] == "normal"
+def test_project_manifest_rejects_invalid_alias() -> None:
+    with pytest.raises(ValueError, match="Invalid source alias"):
+        ProjectManifest(
+            sources={"BadAlias": {"source": "github.com/acme/company-ai-sync", "version": "v1.2.0"}},
+        )
+
+
+def test_split_scoped_ref() -> None:
+    assert split_scoped_ref("company/code-review") == ("company", "code-review")
+
+
+def test_split_scoped_ref_rejects_invalid_values() -> None:
+    with pytest.raises(ValueError):
+        split_scoped_ref("company")
 
 
 def test_find_project_root_walks_up(tmp_path: Path) -> None:
     project = tmp_path / "code" / "myproject"
     project.mkdir(parents=True)
-    (project / ".ai-sync.yaml").write_text("agents: []")
+    (project / ".ai-sync.yaml").write_text("sources: {}\n", encoding="utf-8")
     subdir = project / "src" / "deep"
     subdir.mkdir(parents=True)
 
-    found = find_project_root(subdir)
-    assert found == project
+    assert find_project_root(subdir) == project
 
 
 def test_find_project_root_returns_none(tmp_path: Path) -> None:
-    found = find_project_root(tmp_path)
-    assert found is None
+    assert find_project_root(tmp_path) is None
 
 
-def test_load_defaults_missing(tmp_path: Path) -> None:
-    result = load_defaults([])
-    assert result == {}
-
-
-def test_load_defaults_present(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    defaults = {"agents": ["a1"], "settings": {"mode": "normal"}}
-    (repo / "defaults.yaml").write_text(yaml.safe_dump(defaults))
-
-    result = load_defaults([repo])
-    assert result["agents"] == ["a1"]
-
-
-def test_load_defaults_last_repo_wins(tmp_path: Path) -> None:
-    repo_a = tmp_path / "repo-a"
-    repo_a.mkdir()
-    (repo_a / "defaults.yaml").write_text(yaml.safe_dump({"agents": ["from-a"]}))
-    repo_b = tmp_path / "repo-b"
-    repo_b.mkdir()
-    (repo_b / "defaults.yaml").write_text(yaml.safe_dump({"agents": ["from-b"]}))
-
-    result = load_defaults([repo_a, repo_b])
-    assert result["agents"] == ["from-b"]
-
-
-def test_validate_against_registry(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    prompts_dir = repo / "prompts"
-    prompts_dir.mkdir(parents=True)
-    (prompts_dir / "agent_a.md").write_text("content")
-
-    skills_dir = repo / "skills" / "skill-a"
-    skills_dir.mkdir(parents=True)
-    (skills_dir / "SKILL.md").write_text("content")
-
-    (repo / "mcp-servers.yaml").write_text(yaml.safe_dump({"servers": {"srv1": {"method": "stdio", "command": "x"}}}))
-
-    manifest = ProjectManifest(
-        agents=["agent_a", "agent_b"],
-        skills=["skill-a", "skill-x"],
-        mcp_servers=["srv1", "srv2"],
-    )
-    warnings = validate_against_registry(manifest, [repo])
-    assert any("agent_b" in w for w in warnings)
-    assert any("skill-x" in w for w in warnings)
-    assert any("srv2" in w for w in warnings)
-    assert not any("agent_a" in w for w in warnings)
-    assert not any("skill-a" in w for w in warnings)
-    assert not any("srv1" in w for w in warnings)
-
-
-def test_validate_against_registry_multi_repo(tmp_path: Path) -> None:
-    repo_a = tmp_path / "repo-a"
-    (repo_a / "prompts").mkdir(parents=True)
-    (repo_a / "prompts" / "agent_a.md").write_text("content")
-
-    repo_b = tmp_path / "repo-b"
-    (repo_b / "skills" / "skill-b").mkdir(parents=True)
-    (repo_b / "skills" / "skill-b" / "SKILL.md").write_text("content")
-
-    manifest = ProjectManifest(agents=["agent_a"], skills=["skill-b"])
-    warnings = validate_against_registry(manifest, [repo_a, repo_b])
-    assert warnings == []
+def test_manifest_fingerprint_changes_with_content(tmp_path: Path) -> None:
+    manifest_path = tmp_path / ".ai-sync.yaml"
+    manifest_path.write_text("sources: {}\n", encoding="utf-8")
+    first = manifest_fingerprint(manifest_path)
+    manifest_path.write_text("sources:\n  company:\n    source: ../company\n", encoding="utf-8")
+    assert manifest_fingerprint(manifest_path) != first
 
 
 def test_no_ai_sync_yaml_raises(tmp_path: Path) -> None:
-    import pytest
-
     with pytest.raises(RuntimeError, match="No .ai-sync.yaml"):
         resolve_project_manifest(tmp_path)

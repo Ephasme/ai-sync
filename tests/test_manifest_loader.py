@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from ai_sync.manifest_loader import load_and_filter_mcp, load_manifest
+from ai_sync.source_resolver import ResolvedSource
 
 
 class FakeDisplay:
@@ -22,6 +23,10 @@ class FakeDisplay:
 
     def table(self, headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> None:
         self.messages.append(("table", ",".join(headers)))
+
+
+def _source(alias: str, root: Path) -> ResolvedSource:
+    return ResolvedSource(alias=alias, source=str(root), version=None, root=root, kind="local", fingerprint="abc")
 
 
 def test_load_manifest_missing_returns_empty(tmp_path: Path) -> None:
@@ -55,51 +60,51 @@ def test_load_manifest_valid(tmp_path: Path) -> None:
     assert "ok" in data["servers"]
 
 
-def test_load_and_filter_mcp_single_repo(tmp_path: Path) -> None:
+def test_load_and_filter_mcp_by_scoped_refs(tmp_path: Path) -> None:
     display = FakeDisplay()
-    repo = tmp_path / "repo-a"
-    repo.mkdir()
-    (repo / "mcp-servers.yaml").write_text(
+    company = tmp_path / "company"
+    company.mkdir()
+    (company / "mcp-servers.yaml").write_text(
         "servers:\n  srv-a:\n    method: stdio\n    command: npx\n  srv-b:\n    method: stdio\n    command: npx\n",
         encoding="utf-8",
     )
-    result = load_and_filter_mcp([repo], ["srv-a"], display)
+    result = load_and_filter_mcp({"company": _source("company", company)}, ["company/srv-a"], display)
     assert "srv-a" in result
     assert "srv-b" not in result
 
 
-def test_load_and_filter_mcp_last_repo_wins(tmp_path: Path) -> None:
+def test_load_and_filter_mcp_rejects_missing_server(tmp_path: Path) -> None:
     display = FakeDisplay()
-    repo_a = tmp_path / "repo-a"
-    repo_a.mkdir()
-    (repo_a / "mcp-servers.yaml").write_text(
-        "servers:\n  fetch:\n    method: stdio\n    command: old-cmd\n",
+    company = tmp_path / "company"
+    company.mkdir()
+    (company / "mcp-servers.yaml").write_text(
+        "servers:\n  srv-a:\n    method: stdio\n    command: npx\n",
         encoding="utf-8",
     )
-    repo_b = tmp_path / "repo-b"
-    repo_b.mkdir()
-    (repo_b / "mcp-servers.yaml").write_text(
-        "servers:\n  fetch:\n    method: stdio\n    command: new-cmd\n",
-        encoding="utf-8",
-    )
-    result = load_and_filter_mcp([repo_a, repo_b], ["fetch"], display)
-    assert result["fetch"]["command"] == "new-cmd"
+    with pytest.raises(RuntimeError, match="was not found"):
+        load_and_filter_mcp({"company": _source("company", company)}, ["company/srv-b"], display)
 
 
-def test_load_and_filter_mcp_merges_servers(tmp_path: Path) -> None:
+def test_load_and_filter_mcp_rejects_colliding_output_ids(tmp_path: Path) -> None:
     display = FakeDisplay()
-    repo_a = tmp_path / "repo-a"
-    repo_a.mkdir()
-    (repo_a / "mcp-servers.yaml").write_text(
-        "servers:\n  srv-a:\n    method: stdio\n    command: a\n",
+    company = tmp_path / "company"
+    company.mkdir()
+    (company / "mcp-servers.yaml").write_text(
+        "servers:\n  fetch:\n    method: stdio\n    command: company\n",
         encoding="utf-8",
     )
-    repo_b = tmp_path / "repo-b"
-    repo_b.mkdir()
-    (repo_b / "mcp-servers.yaml").write_text(
-        "servers:\n  srv-b:\n    method: stdio\n    command: b\n",
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    (frontend / "mcp-servers.yaml").write_text(
+        "servers:\n  fetch:\n    method: stdio\n    command: frontend\n",
         encoding="utf-8",
     )
-    result = load_and_filter_mcp([repo_a, repo_b], ["srv-a", "srv-b"], display)
-    assert "srv-a" in result
-    assert "srv-b" in result
+    with pytest.raises(RuntimeError, match="collision"):
+        load_and_filter_mcp(
+            {
+                "company": _source("company", company),
+                "frontend": _source("frontend", frontend),
+            },
+            ["company/fetch", "frontend/fetch"],
+            display,
+        )

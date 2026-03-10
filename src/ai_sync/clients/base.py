@@ -105,4 +105,4 @@ class Client(ABC):
         pass
 
     def post_apply(self) -> None:
-        """Hook called after all sync operations complete. Override for client-specific setup."""
+        """Deprecated hook kept for compatibility; apply stays project-scoped in V1."""

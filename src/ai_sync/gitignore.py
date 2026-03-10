@@ -10,8 +10,9 @@ SENSITIVE_PATHS = [
     ".cursor/*",
     ".codex/*",
     ".gemini/*",
-    ".ai-sync.local.yaml",
+    ".ai-sync/sources/",
     ".ai-sync/state/",
+    ".ai-sync/last-plan.yaml",
     ".env.ai-sync",
 ]
 

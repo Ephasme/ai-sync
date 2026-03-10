@@ -222,16 +222,7 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
             track_write_blocks(specs, store)
 
     def post_apply(self) -> None:
-        trusted_path = Path.home() / ".gemini" / "trustedFolders.json"
-        project_key = str(self._project_root)
-        data = self._read_json_config(trusted_path)
-
-        if data.get(project_key) == "TRUST_FOLDER":
-            return
-
-        data[project_key] = "TRUST_FOLDER"
-        trusted_path.parent.mkdir(parents=True, exist_ok=True)
-        trusted_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        return
 
     def sync_instructions(self, instructions_content: str, store: StateStore) -> None:
         if not instructions_content.strip():

@@ -60,7 +60,7 @@ class DummyClient(Client):
 
 
 def _make_repo_root(tmp_path: Path) -> Path:
-    """Create a single repo root in the new flat layout (no config/ subdir)."""
+    """Create a single source root in the flat layout."""
     root = tmp_path / "repo"
     (root / "prompts").mkdir(parents=True)
     (root / "skills" / "skill-one").mkdir(parents=True)
@@ -80,19 +80,26 @@ def test_run_apply_syncs_agents_and_mcp(monkeypatch, tmp_path: Path) -> None:
     repo_root = _make_repo_root(tmp_path)
     project_root = tmp_path / "project"
     project_root.mkdir()
-    (project_root / ".ai-sync.yaml").write_text("agents: [agent]\nskills: [skill-one]\n", encoding="utf-8")
+    (project_root / ".ai-sync.yaml").write_text("sources: {}\n", encoding="utf-8")
     display = FakeDisplay()
     calls: list[str] = []
     dummy_clients = [DummyClient("codex", project_root, tmp_path, calls)]
     monkeypatch.setattr(sync_runner, "create_clients", lambda pr: dummy_clients)
 
-    manifest = ProjectManifest(agents=["agent"], skills=["skill-one"], commands=[], mcp_servers=["srv"], settings={})
+    manifest = ProjectManifest(
+        sources={"company": {"source": str(repo_root)}},
+        agents=["company/agent"],
+        skills=["company/skill-one"],
+        commands=[],
+        mcp_servers=["company/srv"],
+        settings={},
+    )
     mcp_manifest = {"srv": {"method": "stdio", "command": "npx", "env": {"TOKEN": "abc"}}}
     secrets: dict = {}
 
     result = sync_runner.run_apply(
         project_root=project_root,
-        repo_roots=[repo_root],
+        source_roots={"company": repo_root},
         manifest=manifest,
         mcp_manifest=mcp_manifest,
         secrets=secrets,
@@ -118,7 +125,7 @@ def test_sync_skills_copies_root_files(tmp_path: Path, monkeypatch) -> None:
     client = DummyClient("codex", project_root, tmp_path, calls)
     store = StateStore(project_root)
 
-    sync_runner.sync_skills([repo_root], ["skill-one"], [client], store, display)
+    sync_runner.sync_skills({"company": repo_root}, ["company/skill-one"], [client], store, display)
     target = client.get_skills_dir() / "skill-one" / "reference.md"
     assert target.exists()
 
@@ -136,21 +143,16 @@ def test_sync_commands_copies_files(tmp_path: Path, monkeypatch) -> None:
     client = DummyClient("codex", project_root, tmp_path, calls)
     store = StateStore(project_root)
 
-    sync_runner.sync_commands([repo_root], ["shortcut.md"], [client], store, display)
+    sync_runner.sync_commands({"company": repo_root}, ["company/shortcut.md"], [client], store, display)
     target = client.config_dir / "commands" / "shortcut.md"
     assert target.exists()
-    assert "write_command:codex:shortcut.md" in calls
+    assert "write_command:codex:company/shortcut.md" in calls
 
 
-def test_sync_agents_last_repo_wins(tmp_path: Path, monkeypatch) -> None:
+def test_sync_agents_uses_scoped_source_alias(tmp_path: Path, monkeypatch) -> None:
     repo_a = tmp_path / "repo-a"
     (repo_a / "prompts").mkdir(parents=True)
     (repo_a / "prompts" / "agent.md").write_text("## From A\n", encoding="utf-8")
-
-    repo_b = tmp_path / "repo-b"
-    (repo_b / "prompts").mkdir(parents=True)
-    (repo_b / "prompts" / "agent.md").write_text("## From B\n", encoding="utf-8")
-
     monkeypatch.setenv("HOME", str(tmp_path))
     display = FakeDisplay()
     calls: list[str] = []
@@ -159,7 +161,7 @@ def test_sync_agents_last_repo_wins(tmp_path: Path, monkeypatch) -> None:
     client = DummyClient("codex", project_root, tmp_path, calls)
     store = StateStore(project_root)
 
-    sync_runner.sync_agents([repo_a, repo_b], ["agent"], [client], store, display)
+    sync_runner.sync_agents({"company": repo_a}, ["company/agent"], [client], store, display)
 
     written = client.get_agents_dir() / "agent" / "prompt.md"
-    assert written.read_text(encoding="utf-8") == "## From B\n"
+    assert written.read_text(encoding="utf-8") == "## From A\n"

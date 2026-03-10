@@ -10,25 +10,17 @@ import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, cast
+from typing import Iterator
 
 import yaml
 
 from .config_store import DEFAULT_SECRET_PROVIDER, ensure_layout, get_config_root, load_config, write_config
 from .display import PlainDisplay, RichDisplay
 from .display.base import Display
-from .env_loader import collect_env_refs, resolve_env_refs_in_obj
 from .error_handler import LOG_FILENAME, handle_fatal
-from .gitignore import SENSITIVE_PATHS, check_gitignore, write_gitignore_entries
-from .interactive import run_init_prompts
-from .manifest_loader import load_and_filter_mcp
-from .op_inject import load_runtime_env_from_op
-from .project import (
-    find_project_root,
-    load_defaults,
-    resolve_project_manifest,
-    validate_against_registry,
-)
+from .gitignore import check_gitignore
+from .planning import build_plan_context, default_plan_path, render_plan, save_plan, validate_saved_plan
+from .project import find_project_root, resolve_project_manifest
 from .repo_store import (
     SLUG_ERROR_MSG,
     RepoEntry,
@@ -40,8 +32,6 @@ from .repo_store import (
     save_repos,
     validate_slug,
 )
-from .requirements_checker import check_requirements
-from .requirements_loader import load_and_filter_requirements
 from .sync_runner import run_apply
 from .uninstall import run_uninstall
 from .version_checks import check_client_versions, get_default_versions_path
@@ -63,15 +53,30 @@ def _clone_remote_repo(repo: str) -> Iterator[Path]:
         yield clone_path
 
 
+def _load_optional_servers(repo_root: Path) -> dict[str, object]:
+    mcp_path = repo_root / "mcp-servers.yaml"
+    if not mcp_path.exists():
+        return {}
+    try:
+        with open(mcp_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except (yaml.YAMLError, OSError):
+        return {}
+    servers = data.get("servers") if isinstance(data, dict) else {}
+    return servers if isinstance(servers, dict) else {}
+
+
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Sync AI configs (agents, skills, commands, rules, MCP servers) per-project.")
+    parser = argparse.ArgumentParser(
+        description="Sync AI configs (agents, skills, commands, rules, MCP servers) per-project.",
+    )
     subparsers = parser.add_subparsers(dest="command")
 
-    install_parser = subparsers.add_parser("install", help="Initialize ~/.ai-sync and store 1Password settings.")
+    install_parser = subparsers.add_parser("install", help="Initialize ~/.ai-sync bootstrap and store auth settings.")
     install_parser.add_argument("--op-account", metavar="NAME", help="1Password account name (desktop app auth).")
     install_parser.add_argument("--force", action="store_true", help="Overwrite existing config.toml.")
 
-    import_parser = subparsers.add_parser("import", help="Import config from a repo into ~/.ai-sync.")
+    import_parser = subparsers.add_parser("import", help="Legacy helper: import a config repo into ~/.ai-sync.")
     import_parser.add_argument("--repo", required=True, help="Local path or git URL to import from.")
     import_parser.add_argument(
         "--name",
@@ -85,17 +90,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Overwrite an existing repo entry with the same name.",
     )
 
-    init_parser = subparsers.add_parser("init", help="Initialize .ai-sync.yaml in the current project.")
-    init_parser.add_argument(
-        "--tag",
-        metavar="TAG[,TAG...]",
-        help="Comma-separated tags; auto-selects matching artifacts and skips interactive prompts.",
-    )
+    plan_parser = subparsers.add_parser("plan", help="Resolve sources, render a plan, and save a plan artifact.")
+    plan_parser.add_argument("--plain", action="store_true", help="Plain output mode (no interactive prompts).")
+    plan_parser.add_argument("--out", metavar="PATH", help="Write the plan artifact to PATH.")
 
     apply_parser = subparsers.add_parser("apply", help="Apply ai-sync config to the current project.")
     apply_parser.add_argument("--plain", action="store_true", help="Plain output mode (no interactive prompts).")
+    apply_parser.add_argument("planfile", nargs="?", help="Optional saved plan file to validate and apply.")
 
-    subparsers.add_parser("doctor", help="Check setup and project health.")
+    subparsers.add_parser("doctor", help="Check machine bootstrap and project planning health.")
 
     uninstall_parser = subparsers.add_parser("uninstall", help="Remove ai-sync managed changes from current project.")
     uninstall_parser.add_argument("--apply", action="store_true", help="Apply uninstall (default is dry-run).")
@@ -225,12 +228,8 @@ def _discover_registry(repo_roots: list[Path]) -> tuple[list[str], list[str], li
             for p in rules_dir.glob("*.md"):
                 rules_seen[p.stem] = p.stem
 
-        mcp_path = repo_root / "mcp-servers.yaml"
-        if mcp_path.exists():
-            with open(mcp_path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
-            for server_id in (data.get("servers") or {}).keys():
-                mcp_servers_seen[server_id] = server_id
+        for server_id in _load_optional_servers(repo_root).keys():
+            mcp_servers_seen[server_id] = server_id
 
     return (
         sorted(agents_seen),
@@ -300,15 +299,11 @@ def _discover_artifact_tags(repo_roots: list[Path]) -> dict[str, dict[str, list[
                 if isinstance(tags, list):
                     result["rules"][rule_name] = tags
 
-        mcp_path = repo_root / "mcp-servers.yaml"
-        if mcp_path.exists():
-            with open(mcp_path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
-            for server_id, server_cfg in (data.get("servers") or {}).items():
-                if isinstance(server_cfg, dict):
-                    tags = server_cfg.get("tags") or []
-                    if isinstance(tags, list) and tags:
-                        result["mcp-servers"][server_id] = tags
+        for server_id, server_cfg in _load_optional_servers(repo_root).items():
+            if isinstance(server_cfg, dict):
+                tags = server_cfg.get("tags") or []
+                if isinstance(tags, list) and tags:
+                    result["mcp-servers"][server_id] = tags
 
     return result
 
@@ -318,128 +313,35 @@ def _filter_by_tags(artifacts: list[str], artifact_tags: dict[str, list[str]], t
     return [a for a in artifacts if tags & set(artifact_tags.get(a) or [])]
 
 
+def _ensure_installed(config_root: Path, display: Display) -> bool:
+    if config_root.exists() and (config_root / "config.toml").exists():
+        return True
+    display.panel("Run `ai-sync install` first.", title="Not set up", style="error")
+    return False
+
+
 def _run_init(args: argparse.Namespace, config_root: Path, display: Display) -> int:
-    if not config_root.exists() or not (config_root / "config.toml").exists():
-        display.panel(
-            "Run `ai-sync install` and `ai-sync import` first.",
-            title="Not set up",
-            style="error",
-        )
+    display.panel(
+        "`ai-sync init` is deprecated in this workflow.\nWrite `.ai-sync.yaml` by hand, then run `ai-sync plan`.",
+        title="Deprecated command",
+        style="error",
+    )
+    return 1
+
+
+def _run_plan(args: argparse.Namespace, config_root: Path, display: Display) -> int:
+    if not _ensure_installed(config_root, display):
         return 1
-
-    repo_roots = get_all_repo_roots(config_root)
-    if not repo_roots:
-        display.panel(
-            "No repos imported. Run `ai-sync import` first.",
-            title="No repos",
-            style="error",
-        )
-        return 1
-
-    project_root = Path.cwd()
-    if (project_root / ".ai-sync.yaml").exists():
-        display.panel(
-            f".ai-sync.yaml already exists in {project_root}.",
-            title="Already initialised",
-            style="error",
-        )
-        return 1
-
-    agents, skills, commands, rules, mcp_servers = _discover_registry(repo_roots)
-    defaults = load_defaults(repo_roots)
-
-    tag_arg: str | None = getattr(args, "tag", None)
-    if tag_arg:
-        tags = {t.strip() for t in tag_arg.split(",") if t.strip()}
-        artifact_tags = _discover_artifact_tags(repo_roots)
-        selected_agents = _filter_by_tags(agents, artifact_tags["agents"], tags)
-        selected_skills = _filter_by_tags(skills, artifact_tags["skills"], tags)
-        selected_commands = _filter_by_tags(commands, artifact_tags["commands"], tags)
-        selected_rules = _filter_by_tags(rules, artifact_tags["rules"], tags)
-        selected_mcp = _filter_by_tags(mcp_servers, artifact_tags["mcp-servers"], tags)
-        default_settings = defaults.get("settings") or {}
-        tools_defaults = default_settings.get("tools") or {}
-        result = {
-            "agents": selected_agents,
-            "skills": selected_skills,
-            "commands": selected_commands,
-            "rules": selected_rules,
-            "mcp-servers": selected_mcp,
-            "settings": {
-                "mode": default_settings.get("mode", "normal"),
-                "experimental": default_settings.get("experimental", True),
-                "subagents": default_settings.get("subagents", True),
-                "tools": {"sandbox": tools_defaults.get("sandbox", False)},
-            },
-        }
-        display.print(
-            f"Auto-selected {len(selected_agents)} agents, {len(selected_skills)} skills, "
-            f"{len(selected_commands)} commands, {len(selected_rules)} rules, "
-            f"{len(selected_mcp)} MCP servers "
-            f"matching tags: {', '.join(sorted(tags))}",
-            style="success",
-        )
-    else:
-        result = run_init_prompts(display, agents, skills, commands, rules, mcp_servers, defaults)
-        if result is None:
-            display.print("Cancelled.", style="dim")
-            return 1
-
-    ai_sync_yaml = project_root / ".ai-sync.yaml"
-    with open(ai_sync_yaml, "w", encoding="utf-8") as f:
-        yaml.safe_dump(result, f, sort_keys=False, default_flow_style=False)
-    display.print(f"Wrote {ai_sync_yaml}", style="success")
-
-    ai_sync_dir = project_root / ".ai-sync"
-    ai_sync_dir.mkdir(parents=True, exist_ok=True)
-
-    write_gitignore_entries(project_root, SENSITIVE_PATHS)
-    display.print("Updated .gitignore with ai-sync entries", style="success")
-
-    return 0
-
-
-def _run_apply(args: argparse.Namespace, config_root: Path, display: Display) -> int:
-    if not config_root.exists() or not (config_root / "config.toml").exists():
-        display.panel(
-            "Run `ai-sync install` first.",
-            title="Not set up",
-            style="error",
-        )
-        return 1
-
-    repo_roots = get_all_repo_roots(config_root)
-    if not repo_roots:
-        display.panel(
-            "No repos imported. Run `ai-sync import` first.",
-            title="No repos",
-            style="error",
-        )
-        return 1
-
     project_root = find_project_root()
     if project_root is None:
-        display.panel(
-            "No .ai-sync.yaml found. Run `ai-sync init` to set up this project.",
-            title="No project",
-            style="error",
-        )
+        display.panel("No .ai-sync.yaml found. Create one first.", title="No project", style="error")
         return 1
 
-    manifest = resolve_project_manifest(project_root)
-
-    warnings = validate_against_registry(manifest, repo_roots)
-    for w in warnings:
-        display.print(f"Warning: {w}", style="warning")
-
-    has_env_tpl = any((r / ".env.ai-sync.tpl").exists() for r in repo_roots)
-    needs_gitignore = manifest.mcp_servers or has_env_tpl
     uncovered = check_gitignore(project_root)
-    if uncovered and needs_gitignore:
+    if uncovered:
         display.panel(
-            "The following sensitive paths are not covered by .gitignore:\n"
-            + "\n".join(f"  - {p}" for p in uncovered)
-            + "\n\nRun `ai-sync init` or add them manually to .gitignore.",
+            "The following ai-sync managed paths are not covered by .gitignore:\n"
+            + "\n".join(f"  - {p}" for p in uncovered),
             title="Gitignore gate failed",
             style="error",
         )
@@ -447,44 +349,57 @@ def _run_apply(args: argparse.Namespace, config_root: Path, display: Display) ->
 
     versions_path = get_default_versions_path()
     ok, msg = check_client_versions(versions_path)
-    if not ok:
-        display.print(f"Warning: {msg}", style="warning")
-    elif msg != "OK":
+    if not ok or msg != "OK":
         display.print(f"Warning: {msg}", style="warning")
 
-    mcp_manifest = load_and_filter_mcp(repo_roots, manifest.mcp_servers, display)
+    context = build_plan_context(project_root, config_root, display)
+    render_plan(context.plan, display)
+    out_path = Path(args.out).expanduser() if getattr(args, "out", None) else default_plan_path(project_root)
+    save_plan(context.plan, out_path)
+    display.print(f"Saved plan to {out_path}", style="success")
+    return 0
 
-    req_results = check_requirements(load_and_filter_requirements(repo_roots, manifest.mcp_servers, display))
-    for r in req_results:
-        if not r.ok and r.error:
-            display.print(f"Warning: {r.error}", style="warning")
 
-    runtime_env: dict[str, str] = {}
-    for repo_root in repo_roots:
-        tpl = repo_root / ".env.ai-sync.tpl"
-        if tpl.exists():
-            runtime_env.update(load_runtime_env_from_op(tpl, config_root))
+def _run_apply(args: argparse.Namespace, config_root: Path, display: Display) -> int:
+    if not _ensure_installed(config_root, display):
+        return 1
+    project_root = find_project_root()
+    if project_root is None:
+        display.panel("No .ai-sync.yaml found. Create one first.", title="No project", style="error")
+        return 1
 
-    required_vars = collect_env_refs(mcp_manifest)
-    secrets: dict = {"servers": {}}
-    if required_vars:
-        missing = sorted(required_vars - runtime_env.keys())
-        if missing:
-            display.panel(
-                f"MCP config references env vars not defined in any .env.ai-sync.tpl: {', '.join(missing)}",
-                title="Missing env vars",
-                style="error",
-            )
-            return 1
-        mcp_manifest = cast(dict, resolve_env_refs_in_obj(mcp_manifest, runtime_env))
+    uncovered = check_gitignore(project_root)
+    if uncovered:
+        display.panel(
+            "The following ai-sync managed paths are not covered by .gitignore:\n"
+            + "\n".join(f"  - {p}" for p in uncovered)
+            + "\n\nAdd them to .gitignore before applying.",
+            title="Gitignore gate failed",
+            style="error",
+        )
+        return 1
+
+    versions_path = get_default_versions_path()
+    ok, msg = check_client_versions(versions_path)
+    if not ok or msg != "OK":
+        display.print(f"Warning: {msg}", style="warning")
+
+    context = build_plan_context(project_root, config_root, display)
+    planfile = getattr(args, "planfile", None)
+    if planfile:
+        validate_saved_plan(Path(planfile).expanduser(), context.plan)
+        display.print(f"Validated saved plan: {planfile}", style="success")
+    else:
+        display.print("Applying a fresh plan computed from the current project state.", style="info")
+        render_plan(context.plan, display)
 
     return run_apply(
         project_root=project_root,
-        repo_roots=repo_roots,
-        manifest=manifest,
-        mcp_manifest=mcp_manifest,
-        secrets=secrets,
-        runtime_env=runtime_env,
+        source_roots={alias: source.root for alias, source in context.resolved_sources.items()},
+        manifest=context.manifest,
+        mcp_manifest=context.mcp_manifest,
+        secrets=context.secrets,
+        runtime_env=context.runtime_env,
         display=display,
     )
 
@@ -538,20 +453,10 @@ def _run_doctor(config_root: Path, display: Display) -> int:
         display.print(f"\nProject: {project_root}")
         try:
             manifest = resolve_project_manifest(project_root)
-            display.print(
-                f"  .ai-sync.yaml: OK ({len(manifest.agents)} agents, "
-                f"{len(manifest.skills)} skills, {len(manifest.rules)} rules, "
-                f"{len(manifest.mcp_servers)} MCP servers)",
-                style="success",
-            )
+            display.print(f"  .ai-sync.yaml: OK ({len(manifest.sources)} sources declared)", style="success")
         except RuntimeError as exc:
             display.print(f"  .ai-sync.yaml: {exc}", style="warning")
             return 1
-
-        repo_roots = get_all_repo_roots(config_root)
-        warnings = validate_against_registry(manifest, repo_roots)
-        for w in warnings:
-            display.print(f"  Warning: {w}", style="warning")
 
         uncovered = check_gitignore(project_root)
         if uncovered:
@@ -559,12 +464,14 @@ def _run_doctor(config_root: Path, display: Display) -> int:
         else:
             display.print("  Gitignore: OK", style="success")
 
-        req_results = check_requirements(load_and_filter_requirements(repo_roots, manifest.mcp_servers, display))
-        for r in req_results:
-            if r.ok:
-                display.print(f"  \u2713 {r.name} ({r.actual})", style="success")
-            elif r.error:
-                display.print(f"  \u2717 {r.error}", style="warning")
+        try:
+            context = build_plan_context(project_root, config_root, display)
+            display.print(
+                f"  Planned: {len(context.plan.actions)} action(s) from {len(context.resolved_sources)} source(s)",
+                style="success",
+            )
+        except RuntimeError as exc:
+            display.print(f"  Plan check failed: {exc}", style="warning")
     else:
         display.print("\nNo project found (no .ai-sync.yaml in current directory tree)", style="dim")
 
@@ -577,6 +484,284 @@ def _run_uninstall(args: argparse.Namespace, display: Display) -> int:
         display.panel("No .ai-sync.yaml found. Nothing to uninstall.", title="No project", style="error")
         return 1
     return run_uninstall(project_root, apply=bool(args.apply))
+
+
+ARTIFACT_TYPE_TO_YAML_KEY = {
+    "agent": "agents",
+    "skill": "skills",
+    "command": "commands",
+    "rule": "rules",
+    "mcp-server": "mcp-servers",
+}
+
+
+def _display_name(name: str) -> str:
+    """Strip .md extension for human-friendly display."""
+    return name.removesuffix(".md")
+
+
+def _find_canonical(name: str, items: list[str]) -> str | None:
+    """Match *name* against *items*, ignoring .md extensions."""
+    bare = name.removesuffix(".md")
+    for item in items:
+        if item.removesuffix(".md") == bare:
+            return item
+    return None
+
+
+def _resolve_artifact_type(
+    name: str,
+    explicit_type: str | None,
+    repo_roots: list[Path],
+    display: Display,
+) -> tuple[str, str] | None:
+    """Resolve artifact type from registry.
+
+    Returns ``(type, canonical_name)`` or *None* on error.
+    """
+    agents, skills, commands, rules, mcp_servers = _discover_registry(repo_roots)
+    registry = {
+        "agent": agents, "skill": skills, "command": commands,
+        "rule": rules, "mcp-server": mcp_servers,
+    }
+    found: list[tuple[str, str]] = []
+    for art_type, items in registry.items():
+        canonical = _find_canonical(name, items)
+        if canonical is not None:
+            found.append((art_type, canonical))
+
+    if explicit_type:
+        canonical = _find_canonical(name, registry[explicit_type])
+        if canonical is None:
+            display.panel(
+                f"{name!r} is not a known {explicit_type} in any imported repo.",
+                title="Not found",
+                style="error",
+            )
+            return None
+        return explicit_type, canonical
+
+    if not found:
+        display.panel(
+            f"{name!r} was not found in any imported repo.\n"
+            "Use --type to specify the artifact type explicitly.",
+            title="Not found",
+            style="error",
+        )
+        return None
+
+    if len(found) > 1:
+        types_str = ", ".join(t for t, _ in found)
+        display.panel(
+            f"{name!r} exists as multiple types: {types_str}.\n"
+            f"Use --type to disambiguate, e.g.: "
+            f"ai-sync add {name} --type={found[0][0]}",
+            title="Ambiguous name",
+            style="error",
+        )
+        return None
+
+    return found[0]
+
+
+def _resolve_artifact_type_from_manifest(
+    name: str,
+    explicit_type: str | None,
+    manifest_data: dict,
+    display: Display,
+) -> tuple[str, str] | None:
+    """Resolve artifact type from the current manifest.
+
+    Returns ``(type, canonical_name)`` or *None* on error.
+    """
+    found: list[tuple[str, str]] = []
+    for art_type, yaml_key in ARTIFACT_TYPE_TO_YAML_KEY.items():
+        canonical = _find_canonical(name, manifest_data.get(yaml_key) or [])
+        if canonical is not None:
+            found.append((art_type, canonical))
+
+    if explicit_type:
+        yaml_key = ARTIFACT_TYPE_TO_YAML_KEY[explicit_type]
+        canonical = _find_canonical(name, manifest_data.get(yaml_key) or [])
+        if canonical is None:
+            display.panel(
+                f"{name!r} is not in the manifest as a {explicit_type}.",
+                title="Not found",
+                style="error",
+            )
+            return None
+        return explicit_type, canonical
+
+    if not found:
+        display.panel(
+            f"{name!r} is not in the manifest.\n"
+            "Use --type to specify the artifact type explicitly.",
+            title="Not found",
+            style="error",
+        )
+        return None
+
+    if len(found) > 1:
+        types_str = ", ".join(t for t, _ in found)
+        display.panel(
+            f"{name!r} exists as multiple types in the manifest: "
+            f"{types_str}.\nUse --type to disambiguate, e.g.: "
+            f"ai-sync remove {name} --type={found[0][0]}",
+            title="Ambiguous name",
+            style="error",
+        )
+        return None
+
+    return found[0]
+
+
+def _edit_manifest_and_apply(
+    project_root: Path,
+    config_root: Path,
+    yaml_key: str,
+    name: str,
+    action: str,
+    display: Display,
+) -> int:
+    """Add or remove *name* from *yaml_key* in .ai-sync.yaml, then run apply."""
+    ai_sync_yaml = project_root / ".ai-sync.yaml"
+    data = yaml.safe_load(ai_sync_yaml.read_text(encoding="utf-8")) or {}
+    items: list[str] = data.get(yaml_key) or []
+
+    if action == "add":
+        if name in items:
+            display.print(f"{name!r} is already in {yaml_key}.", style="dim")
+        else:
+            items.append(name)
+            data[yaml_key] = items
+            with open(ai_sync_yaml, "w", encoding="utf-8") as f:
+                yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
+            display.print(f"Added {name!r} to {yaml_key} in .ai-sync.yaml", style="success")
+    elif action == "remove":
+        if name not in items:
+            display.print(f"{name!r} is not in {yaml_key}.", style="dim")
+            return 0
+        items.remove(name)
+        data[yaml_key] = items
+        with open(ai_sync_yaml, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
+        display.print(f"Removed {name!r} from {yaml_key} in .ai-sync.yaml", style="success")
+
+    args = argparse.Namespace(plain=False)
+    return _run_apply(args, config_root, display)
+
+
+def _run_add(args: argparse.Namespace, config_root: Path, display: Display) -> int:
+    if not config_root.exists() or not (config_root / "config.toml").exists():
+        display.panel("Run `ai-sync install` first.", title="Not set up", style="error")
+        return 1
+    repo_roots = get_all_repo_roots(config_root)
+    if not repo_roots:
+        display.panel("No repos imported. Run `ai-sync import` first.", title="No repos", style="error")
+        return 1
+    project_root = find_project_root()
+    if project_root is None:
+        display.panel("No .ai-sync.yaml found. Run `ai-sync init` first.", title="No project", style="error")
+        return 1
+
+    result = _resolve_artifact_type(args.name, args.type, repo_roots, display)
+    if result is None:
+        return 1
+    art_type, canonical = result
+
+    yaml_key = ARTIFACT_TYPE_TO_YAML_KEY[art_type]
+    display.print(f"Resolved {_display_name(args.name)!r} as {art_type}", style="info")
+    return _edit_manifest_and_apply(project_root, config_root, yaml_key, canonical, "add", display)
+
+
+def _run_remove(args: argparse.Namespace, config_root: Path, display: Display) -> int:
+    project_root = find_project_root()
+    if project_root is None:
+        display.panel("No .ai-sync.yaml found. Run `ai-sync init` first.", title="No project", style="error")
+        return 1
+
+    ai_sync_yaml = project_root / ".ai-sync.yaml"
+    manifest_data = yaml.safe_load(ai_sync_yaml.read_text(encoding="utf-8")) or {}
+
+    result = _resolve_artifact_type_from_manifest(args.name, args.type, manifest_data, display)
+    if result is None:
+        return 1
+    art_type, canonical = result
+
+    config_root_check = get_config_root()
+    yaml_key = ARTIFACT_TYPE_TO_YAML_KEY[art_type]
+    display.print(f"Resolved {_display_name(args.name)!r} as {art_type}", style="info")
+    return _edit_manifest_and_apply(project_root, config_root_check, yaml_key, canonical, "remove", display)
+
+
+def _run_list(args: argparse.Namespace, config_root: Path, display: Display) -> int:
+    if args.installed:
+        project_root = find_project_root()
+        if project_root is None:
+            display.panel(
+                "No .ai-sync.yaml found. Run `ai-sync init` first.",
+                title="No project",
+                style="error",
+            )
+            return 1
+        manifest = resolve_project_manifest(project_root)
+        sections: dict[str, list[str]] = {
+            "Agents": manifest.agents,
+            "Skills": manifest.skills,
+            "Commands": manifest.commands,
+            "Rules": manifest.rules,
+            "MCP Servers": manifest.mcp_servers,
+        }
+        display.print("Installed artifacts:", style="info")
+    else:
+        if not config_root.exists() or not (config_root / "config.toml").exists():
+            display.panel("Run `ai-sync install` first.", title="Not set up", style="error")
+            return 1
+        repo_roots = get_all_repo_roots(config_root)
+        if not repo_roots:
+            display.panel("No repos imported. Run `ai-sync import` first.", title="No repos", style="error")
+            return 1
+        agents, skills, commands, rules, mcp_servers = _discover_registry(repo_roots)
+
+        installed_names: set[str] = set()
+        project_root = find_project_root()
+        if project_root is not None:
+            try:
+                m = resolve_project_manifest(project_root)
+                for n in (
+                    *m.agents, *m.skills, *m.commands,
+                    *m.rules, *m.mcp_servers,
+                ):
+                    installed_names.add(n.removesuffix(".md"))
+            except RuntimeError:
+                pass
+
+        sections = {
+            "Agents": agents,
+            "Skills": skills,
+            "Commands": commands,
+            "Rules": rules,
+            "MCP Servers": mcp_servers,
+        }
+        display.print("Available artifacts:", style="info")
+
+    total = 0
+    for label, items in sections.items():
+        if not items:
+            continue
+        display.print(f"\n  {label}:")
+        for name in items:
+            shown = _display_name(name)
+            marker = ""
+            if not args.installed and shown in installed_names:
+                marker = " (installed)"
+            display.print(f"    - {shown}{marker}")
+            total += 1
+
+    if total == 0:
+        display.print("  (none)", style="dim")
+
+    return 0
 
 
 def main() -> int:
@@ -596,6 +781,8 @@ def main() -> int:
             return _run_install(args, display)
         if args.command == "import":
             return _run_import(args, display)
+        if args.command == "plan":
+            return _run_plan(args, config_root, display)
         if args.command == "init":
             return _run_init(args, config_root, display)
         if args.command == "doctor":

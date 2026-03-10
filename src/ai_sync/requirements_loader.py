@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Mapping
 
 import yaml
 from pydantic import ValidationError
 
 from .display import Display
 from .models import Requirement, RequirementsManifest
+from .project import split_scoped_ref
+from .source_resolver import ResolvedSource
 
 
 def _load_requirements(repo_root: Path, display: Display) -> list[Requirement]:
@@ -29,13 +32,29 @@ def _load_requirements(repo_root: Path, display: Display) -> list[Requirement]:
 
 
 def load_and_filter_requirements(
-    repo_roots: list[Path],
-    enabled_server_ids: list[str],
+    resolved_sources: Mapping[str, ResolvedSource],
+    enabled_server_refs: list[str],
     display: Display,
 ) -> list[Requirement]:
+    selected_by_alias: dict[str, set[str]] = {}
+    for ref in enabled_server_refs:
+        alias, server_id = split_scoped_ref(ref)
+        selected_by_alias.setdefault(alias, set()).add(server_id)
+
     merged: dict[str, Requirement] = {}
-    for repo_root in repo_roots:
-        for req in _load_requirements(repo_root, display):
-            merged[req.name] = req
-    enabled_set = set(enabled_server_ids)
-    return [req for req in merged.values() if set(req.servers) & enabled_set]
+    for alias, server_ids in selected_by_alias.items():
+        if alias not in resolved_sources:
+            raise RuntimeError(f"Unknown source alias {alias!r} in requirements selection.")
+        for req in _load_requirements(resolved_sources[alias].root, display):
+            if not (set(req.servers) & server_ids):
+                continue
+            existing = merged.get(req.name)
+            if existing is None:
+                merged[req.name] = req
+                continue
+            if existing.model_dump() != req.model_dump():
+                raise RuntimeError(
+                    f"Requirement collision for {req.name!r} across selected sources. "
+                    "V1 does not merge conflicting requirement definitions."
+                )
+    return list(merged.values())

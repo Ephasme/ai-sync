@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import tomli
-import tomli_w
-
 from ai_sync.state_store import StateStore
 from ai_sync.track_write import DELETE, WriteSpec, track_write_blocks
 
@@ -261,24 +258,4 @@ class CodexClient(Client):
         )
 
     def post_apply(self) -> None:
-        global_config_path = Path.home() / ".codex" / "config.toml"
-        project_key = str(self._project_root)
-        data: dict = {}
-        if global_config_path.exists():
-            try:
-                with open(global_config_path, "rb") as f:
-                    data = tomli.load(f)
-            except (OSError, tomli.TOMLDecodeError):
-                data = {}
-
-        projects = data.get("projects", {})
-        if not isinstance(projects, dict):
-            projects = {}
-        if projects.get(project_key, {}).get("trust_level") == "trusted":
-            return
-
-        projects[project_key] = {"trust_level": "trusted"}
-        data["projects"] = projects
-        global_config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(global_config_path, "wb") as f:
-            tomli_w.dump(data, f)
+        return
