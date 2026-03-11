@@ -43,8 +43,11 @@ node_modules/
 .DS_Store
 
 # ai-sync managed entries
-.ai-sync.yaml
+.ai-sync.local.yaml
 .cursor/*
 .codex/*
 .gemini/*
+.ai-sync/sources/
 .ai-sync/state/
+.ai-sync/last-plan.yaml
+.env.ai-sync

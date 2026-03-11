@@ -52,9 +52,10 @@ def load_and_filter_requirements(
             if existing is None:
                 merged[req.name] = req
                 continue
-            if existing.model_dump() != req.model_dump():
+            if existing.version.model_dump() != req.version.model_dump():
                 raise RuntimeError(
                     f"Requirement collision for {req.name!r} across selected sources. "
                     "ai-sync does not merge conflicting requirement definitions."
                 )
+            existing.servers = sorted(set(existing.servers) | set(req.servers))
     return list(merged.values())

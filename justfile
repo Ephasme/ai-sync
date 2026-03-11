@@ -7,7 +7,7 @@ default:
 
 install:
     poetry sync --with dev
-    {{venv}}/pre-commit install
+    {{venv}}/pre-commit install --hook-type pre-commit
 
 lock:
     poetry lock

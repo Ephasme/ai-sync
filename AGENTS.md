@@ -6,7 +6,7 @@ This workspace is a multi-project `ai-sync` working area, not a single git repo.
 
 - `ai-sync-core/`: main Python package and CLI implementation.
 - `ai-sync-config-example/`: reference `ai-sync` source repo template.
-- `ai-sync-config-loup/`, `ai-sync-config-sherpas-dev/`, `ai-sync-config-sherpas-leads/`: concrete config repos; treat them as content/config unless the task says otherwise.
+- other `ai-sync-config-*` directories in this workspace: concrete config repos; treat them as content/config unless the task says otherwise.
 
 ## Working In `ai-sync-core`
 

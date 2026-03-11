@@ -5,7 +5,7 @@
 The current workflow is:
 
 1. Install `ai-sync` once on the machine.
-2. Write a project `.ai-sync.yaml`.
+2. Write a project `.ai-sync.yaml` or `.ai-sync.local.yaml`.
 3. Run `ai-sync plan`.
 4. Run `ai-sync apply [planfile]`.
 
@@ -37,17 +37,19 @@ just test
 
 ## Machine bootstrap
 
-`install` is the only machine-level setup step. It writes `~/.ai-sync/config.toml` for auth/bootstrap settings such as 1Password account selection.
+`install` is the only machine-level setup step. It writes `~/.ai-sync/config.toml` for auth/bootstrap settings such as the 1Password account identifier used by the CLI.
 
 ```bash
-ai-sync install --op-account NAME
+ai-sync install --op-account-identifier example.1password.com
 ```
+
+The `--op-account-identifier` value must be a 1Password sign-in address such as `example.1password.com` or a 1Password user ID from `op account list`.
 
 You can also authenticate with `OP_SERVICE_ACCOUNT_TOKEN`.
 
 ## Project workflow
 
-### 1. Write `.ai-sync.yaml`
+### 1. Write `.ai-sync.yaml` or `.ai-sync.local.yaml`
 
 Projects declare their config sources explicitly and select resources by fully scoped ids.
 
@@ -84,8 +86,16 @@ settings:
 
 Notes:
 
+- `.ai-sync.yaml` is the shared project manifest.
+- `.ai-sync.local.yaml` is an optional local override. If it exists, `ai-sync` ignores `.ai-sync.yaml` entirely and uses the local file as the only project manifest.
 - Remote sources must be pinned with `version`.
 - Local path sources are allowed, but they are less portable than pinned remote sources.
+- If your local SSH setup needs a different Git host than the shared manifest uses, prefer a local Git URL rewrite over checking machine-specific hosts into `.ai-sync.yaml`. For example:
+
+```bash
+git config url."git@example-git-host:example-org/".insteadOf "git@github.com:example-org/"
+```
+
 - Every selected resource must be scoped as `<sourceAlias>/<resourceId>`.
 
 ### 2. Run `plan`
@@ -156,8 +166,8 @@ Secrets stay as references in source repos and project config. `ai-sync` resolve
 Example `.env.ai-sync.tpl`:
 
 ```text
-CONTEXT7_API_KEY=op://Employee/AI Tools/CONTEXT7_API_KEY
-EXA_API_KEY=op://Employee/AI Tools/EXA_API_KEY
+CONTEXT7_API_KEY=op://Example Vault/AI Tools/CONTEXT7_API_KEY
+EXA_API_KEY=op://Example Vault/AI Tools/EXA_API_KEY
 PUBLIC_CLIENT_ID=abc123
 ```
 
@@ -184,7 +194,7 @@ It does not modify machine-global client config under `~/.codex`, `~/.cursor`, o
 
 When rules are selected, `ai-sync` writes the merged content to `AGENTS.generated.md` and maintains a small managed link block in `AGENTS.md` instead of replacing the whole file.
 
-You should usually cover these paths with `.gitignore`, but `ai-sync` no longer blocks `plan` or `apply` when they are not ignored.
+You should usually cover these paths and `.ai-sync.local.yaml` with `.gitignore`, but `ai-sync` no longer blocks `plan` or `apply` when they are not ignored.
 
 ## Reliability rules
 

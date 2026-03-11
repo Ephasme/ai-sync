@@ -66,7 +66,9 @@ def _classify(exc: BaseException) -> tuple[str, str]:
         return (
             "1Password not configured",
             "No 1Password account is configured.\n\n"
-            "Run `ai-sync install` to set one up, or export OP_ACCOUNT before running.",
+            "Run `ai-sync install --op-account-identifier example.1password.com` "
+            "to set one up, or export OP_ACCOUNT with a sign-in address or user ID "
+            "before running.",
         )
 
     return ("Error", msg)

@@ -1,14 +1,20 @@
 from __future__ import annotations
 
-import argparse
+from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from ai_sync import cli
-from ai_sync import command_handlers
+from ai_sync import cli, command_handlers
 from ai_sync.display import PlainDisplay
 from ai_sync.gitignore import SENSITIVE_PATHS
+from ai_sync.planning import PlanAction
+
+
+class TTYStringIO(StringIO):
+    def isatty(self) -> bool:
+        return True
 
 
 @pytest.fixture()
@@ -19,7 +25,7 @@ def display() -> PlainDisplay:
 def _write_project(tmp_path: Path, *, with_gitignore: bool = True) -> tuple[Path, Path]:
     config_root = tmp_path / "config"
     config_root.mkdir()
-    (config_root / "config.toml").write_text('op_account = "x"\n', encoding="utf-8")
+    (config_root / "config.toml").write_text('op_account_identifier = "x.1password.com"\n', encoding="utf-8")
 
     source_root = tmp_path / "company-source"
     (source_root / "prompts").mkdir(parents=True)
@@ -66,17 +72,24 @@ def _write_project(tmp_path: Path, *, with_gitignore: bool = True) -> tuple[Path
 
 def test_run_install_writes_config(monkeypatch, tmp_path: Path, display: PlainDisplay) -> None:
     monkeypatch.setattr(command_handlers, "ensure_layout", lambda: tmp_path)
-    assert command_handlers.run_install_command(display=display, op_account="Test", force=True) == 0
-    assert "op_account" in (tmp_path / "config.toml").read_text(encoding="utf-8")
-
-
-def test_run_install_requires_op_account(monkeypatch, tmp_path: Path, display: PlainDisplay) -> None:
-    monkeypatch.setattr(command_handlers, "ensure_layout", lambda: tmp_path)
-    stdin = type("FakeStdin", (), {"isatty": lambda self: False})()
     assert (
         command_handlers.run_install_command(
             display=display,
-            op_account=None,
+            op_account_identifier="example.1password.com",
+            force=True,
+        )
+        == 0
+    )
+    assert "op_account_identifier" in (tmp_path / "config.toml").read_text(encoding="utf-8")
+
+
+def test_run_install_requires_op_account_identifier(monkeypatch, tmp_path: Path, display: PlainDisplay) -> None:
+    monkeypatch.setattr(command_handlers, "ensure_layout", lambda: tmp_path)
+    stdin = StringIO()
+    assert (
+        command_handlers.run_install_command(
+            display=display,
+            op_account_identifier=None,
             force=True,
             environ={},
             stdin=stdin,
@@ -89,6 +102,13 @@ def test_build_parser_has_plan_and_apply() -> None:
     parser = cli._build_parser()
     assert parser.parse_args(["plan"]).command == "plan"
     assert parser.parse_args(["apply"]).command == "apply"
+
+
+def test_build_parser_accepts_op_account_identifier_flag() -> None:
+    parser = cli._build_parser()
+    args = parser.parse_args(["install", "--op-account-identifier", "example.1password.com"])
+    assert args.command == "install"
+    assert args.op_account_identifier == "example.1password.com"
 
 
 def test_run_plan_saves_plan_file(monkeypatch, tmp_path: Path, display: PlainDisplay) -> None:
@@ -170,3 +190,124 @@ def test_run_apply_prints_plan_and_not_legacy_sync_sections(
     assert "Planned Actions" in out
     assert "Syncing Agents" not in out
     assert "Syncing Skills" not in out
+
+
+def test_run_apply_without_project_mentions_both_manifest_names(
+    monkeypatch, tmp_path: Path, display: PlainDisplay, capsys
+) -> None:
+    config_root, _project_root = _write_project(tmp_path)
+    monkeypatch.setattr(command_handlers, "find_project_root", lambda: None)
+
+    assert command_handlers.run_apply_command(config_root=config_root, display=display, planfile=None) == 1
+
+    out = capsys.readouterr().out
+    assert "No .ai-sync.local.yaml or .ai-sync.yaml found. Create one first." in out
+
+
+def test_run_doctor_without_project_mentions_both_manifest_names(
+    monkeypatch, tmp_path: Path, display: PlainDisplay, capsys
+) -> None:
+    config_root, _project_root = _write_project(tmp_path)
+    monkeypatch.setattr(command_handlers, "find_project_root", lambda: None)
+
+    assert command_handlers.run_doctor_command(config_root=config_root, display=display) == 0
+
+    out = capsys.readouterr().out
+    assert "No project found (no .ai-sync.local.yaml or .ai-sync.yaml in current directory tree)" in out
+
+
+def test_run_doctor_reports_local_manifest_name(monkeypatch, tmp_path: Path, display: PlainDisplay, capsys) -> None:
+    config_root, project_root = _write_project(tmp_path)
+    (project_root / ".ai-sync.local.yaml").write_text("sources: {}\n", encoding="utf-8")
+    monkeypatch.setattr(command_handlers, "find_project_root", lambda: project_root)
+
+    assert command_handlers.run_doctor_command(config_root=config_root, display=display) == 0
+
+    out = capsys.readouterr().out
+    assert ".ai-sync.local.yaml: OK (0 sources declared)" in out
+
+
+def test_run_uninstall_without_project_mentions_both_manifest_names(
+    monkeypatch, display: PlainDisplay, capsys
+) -> None:
+    monkeypatch.setattr(command_handlers, "find_project_root", lambda: None)
+
+    assert command_handlers.run_uninstall_command(display=display, apply=False) == 1
+
+    out = capsys.readouterr().out
+    assert "No .ai-sync.local.yaml or .ai-sync.yaml found. Nothing to uninstall." in out
+
+
+def test_confirm_plan_deletions_accepts_yes(display: PlainDisplay) -> None:
+    plan = SimpleNamespace(
+        actions=[
+            PlanAction(
+                action="delete",
+                source_alias="company",
+                kind="skill",
+                resource="company/code-review",
+                target="/tmp/skill",
+                target_key="/tmp/skill",
+            )
+        ]
+    )
+    stdin = TTYStringIO()
+    assert (
+        command_handlers._confirm_plan_deletions(
+            plan,
+            display,
+            stdin=stdin,
+            prompt_input=lambda _prompt: "y",
+        )
+        is True
+    )
+
+
+def test_confirm_plan_deletions_rejects_no(display: PlainDisplay) -> None:
+    plan = SimpleNamespace(
+        actions=[
+            PlanAction(
+                action="delete",
+                source_alias="company",
+                kind="skill",
+                resource="company/code-review",
+                target="/tmp/skill",
+                target_key="/tmp/skill",
+            )
+        ]
+    )
+    stdin = TTYStringIO()
+    assert (
+        command_handlers._confirm_plan_deletions(
+            plan,
+            display,
+            stdin=stdin,
+            prompt_input=lambda _prompt: "n",
+        )
+        is False
+    )
+
+
+def test_confirm_plan_deletions_rejects_non_interactive(display: PlainDisplay) -> None:
+    plan = SimpleNamespace(
+        actions=[
+            PlanAction(
+                action="delete",
+                source_alias="company",
+                kind="skill",
+                resource="company/code-review",
+                target="/tmp/skill",
+                target_key="/tmp/skill",
+            )
+        ]
+    )
+    stdin = StringIO()
+    assert (
+        command_handlers._confirm_plan_deletions(
+            plan,
+            display,
+            stdin=stdin,
+            prompt_input=lambda _prompt: "y",
+        )
+        is False
+    )

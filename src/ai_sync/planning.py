@@ -18,7 +18,13 @@ from .manifest_loader import load_and_filter_mcp
 from .mcp_sync import resolve_servers_for_client
 from .op_inject import load_runtime_env_from_op
 from .path_ops import delete_at_path, set_at_path
-from .project import ProjectManifest, manifest_fingerprint, resolve_project_manifest, split_scoped_ref
+from .project import (
+    ProjectManifest,
+    manifest_fingerprint,
+    resolve_project_manifest,
+    resolve_project_manifest_path,
+    split_scoped_ref,
+)
 from .requirements_checker import check_requirements
 from .requirements_loader import load_and_filter_requirements
 from .source_resolver import ResolvedSource, resolve_sources
@@ -108,8 +114,8 @@ def load_plan(path: Path) -> ApplyPlan:
 
 
 def build_plan_context(project_root: Path, config_root: Path | None, display: Display) -> PlanContext:
+    manifest_path = resolve_project_manifest_path(project_root)
     manifest = resolve_project_manifest(project_root)
-    manifest_path = project_root / ".ai-sync.yaml"
     manifest_hash = manifest_fingerprint(manifest_path)
     resolved_sources = resolve_sources(project_root, manifest)
 
@@ -131,8 +137,20 @@ def build_plan_context(project_root: Path, config_root: Path | None, display: Di
             "MCP config references env vars not defined in any selected source template: " + ", ".join(missing)
         )
     if required_vars:
-        mcp_manifest = resolve_env_refs_in_obj(mcp_manifest, runtime_env)
-    plan = _build_plan(project_root, manifest, manifest_hash, resolved_sources, runtime_env, mcp_manifest, display)
+        resolved_mcp_manifest = resolve_env_refs_in_obj(mcp_manifest, runtime_env)
+        if not isinstance(resolved_mcp_manifest, dict):
+            raise RuntimeError("Resolved MCP manifest must remain a mapping.")
+        mcp_manifest = resolved_mcp_manifest
+    plan = _build_plan(
+        project_root,
+        manifest_path,
+        manifest,
+        manifest_hash,
+        resolved_sources,
+        runtime_env,
+        mcp_manifest,
+        display,
+    )
     return PlanContext(
         plan=plan,
         manifest=manifest,
@@ -665,6 +683,7 @@ def _load_runtime_env(resolved_sources: dict[str, ResolvedSource], config_root: 
 
 def _build_plan(
     project_root: Path,
+    manifest_path: Path,
     manifest: ProjectManifest,
     manifest_hash: str,
     resolved_sources: dict[str, ResolvedSource],
@@ -853,7 +872,7 @@ def _build_plan(
     return ApplyPlan(
         created_at=datetime.now(UTC).isoformat(),
         project_root=str(project_root),
-        manifest_path=str(project_root / ".ai-sync.yaml"),
+        manifest_path=str(manifest_path),
         manifest_fingerprint=manifest_hash,
         sources=sorted(source_models, key=lambda item: item.alias),
         selections=selections,

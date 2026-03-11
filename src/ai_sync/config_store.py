@@ -52,7 +52,7 @@ def write_config(data: dict, config_root: Path | None = None) -> Path:
     return path
 
 
-def resolve_op_account(config_root: Path | None = None) -> str | None:
+def resolve_op_account_identifier(config_root: Path | None = None) -> str | None:
     env_account = os.environ.get("OP_ACCOUNT")
     if env_account:
         return env_account
@@ -60,5 +60,5 @@ def resolve_op_account(config_root: Path | None = None) -> str | None:
         config = load_config(config_root)
     except RuntimeError:
         return None
-    value = config.get("op_account")
+    value = config.get("op_account_identifier")
     return str(value) if value else None

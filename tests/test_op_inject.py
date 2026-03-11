@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -71,4 +72,45 @@ def test_load_runtime_env_async_resolves(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(op_inject.Client, "authenticate", _fake_authenticate)
     monkeypatch.setenv("OP_SERVICE_ACCOUNT_TOKEN", "token")
     env = asyncio.run(op_inject._load_runtime_env_async(env_file, tmp_path))
+    assert env["TOKEN"] == "ok"
+
+
+def test_load_runtime_env_from_op_prefers_cli_inject(monkeypatch, tmp_path: Path) -> None:
+    env_file = tmp_path / ".env.ai-sync.tpl"
+    env_file.write_text("TOKEN=op://Example Vault/example/token\n", encoding="utf-8")
+
+    async def _unexpected_authenticate(*_args, **_kwargs):
+        raise AssertionError("SDK fallback should not run when CLI inject succeeds")
+
+    def _fake_run(args, **kwargs):
+        if args[:3] == ["op", "inject", "--in-file"]:
+            assert kwargs["env"]["OP_ACCOUNT"] == "example.1password.com"
+            return subprocess.CompletedProcess(
+                args=args,
+                returncode=0,
+                stdout="TOKEN=resolved-by-cli\n",
+                stderr="",
+            )
+        raise AssertionError(args)
+
+    monkeypatch.setattr(op_inject.subprocess, "run", _fake_run)
+    monkeypatch.setenv("OP_ACCOUNT", "example.1password.com")
+    monkeypatch.setattr(op_inject.Client, "authenticate", _unexpected_authenticate)
+
+    env = op_inject.load_runtime_env_from_op(env_file, tmp_path)
+    assert env["TOKEN"] == "resolved-by-cli"
+
+
+def test_load_runtime_env_from_op_falls_back_to_sdk_when_cli_missing(monkeypatch, tmp_path: Path) -> None:
+    env_file = tmp_path / ".env.ai-sync.tpl"
+    env_file.write_text("TOKEN=op://vault/item/field\n", encoding="utf-8")
+
+    def _missing_op(*_args, **_kwargs):
+        raise FileNotFoundError("op")
+
+    monkeypatch.setattr(op_inject.subprocess, "run", _missing_op)
+    monkeypatch.setattr(op_inject.Client, "authenticate", _fake_authenticate)
+    monkeypatch.setenv("OP_SERVICE_ACCOUNT_TOKEN", "token")
+
+    env = op_inject.load_runtime_env_from_op(env_file, tmp_path)
     assert env["TOKEN"] == "ok"

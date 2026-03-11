@@ -4,7 +4,7 @@ from pathlib import Path
 
 from ai_sync import sync_runner
 from ai_sync.clients.base import Client
-from ai_sync.project import ProjectManifest
+from ai_sync.project import ProjectManifest, SourceConfig
 from ai_sync.state_store import StateStore
 from ai_sync.track_write import WriteSpec
 
@@ -125,7 +125,7 @@ def test_run_apply_syncs_agents_and_mcp(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(sync_runner, "create_clients", lambda pr: dummy_clients)
 
     manifest = ProjectManifest(
-        sources={"company": {"source": str(repo_root)}},
+        sources={"company": SourceConfig(source=str(repo_root))},
         agents=["company/agent"],
         skills=["company/skill-one"],
         commands=[],

@@ -24,7 +24,11 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     install_parser = subparsers.add_parser("install", help="Initialize ~/.ai-sync bootstrap and store auth settings.")
-    install_parser.add_argument("--op-account", metavar="NAME", help="1Password account name (desktop app auth).")
+    install_parser.add_argument(
+        "--op-account-identifier",
+        metavar="SIGNIN_ADDRESS_OR_USER_ID",
+        help="1Password sign-in address or user ID for desktop app auth (example: example.1password.com).",
+    )
     install_parser.add_argument("--force", action="store_true", help="Overwrite existing config.toml.")
 
     plan_parser = subparsers.add_parser("plan", help="Resolve sources, render a plan, and save a plan artifact.")
@@ -57,7 +61,11 @@ def main() -> int:
 
     try:
         if args.command == "install":
-            return run_install_command(display=display, op_account=args.op_account, force=bool(args.force))
+            return run_install_command(
+                display=display,
+                op_account_identifier=args.op_account_identifier,
+                force=bool(args.force),
+            )
         if args.command == "plan":
             return run_plan_command(config_root=config_root, display=display, out=args.out)
         if args.command == "doctor":

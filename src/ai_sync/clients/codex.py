@@ -146,7 +146,11 @@ class CodexClient(Client):
         config_path = self.config_dir / "config.toml"
         specs = self.build_mcp_specs(servers, secrets)
         existing_targets = store.list_targets(config_path, "toml", "/mcp_servers/")
-        desired_targets = {spec.target for spec in specs if spec.file_path == config_path and spec.target.startswith("/mcp_servers/")}
+        desired_targets = {
+            spec.target
+            for spec in specs
+            if spec.file_path == config_path and spec.target.startswith("/mcp_servers/")
+        }
         existing_ids = {t.split("/", 2)[2] for t in existing_targets if t.count("/") >= 2}
         desired_ids = {t.split("/", 2)[2] for t in desired_targets if t.count("/") >= 2}
         for sid in sorted(existing_ids - desired_ids):
@@ -164,7 +168,11 @@ class CodexClient(Client):
             codex_mcp = {
                 spec.target.split("/", 2)[2]: spec.value
                 for spec in specs
-                if spec.file_path == config_path and spec.target.startswith("/mcp_servers/") and spec.value is not DELETE
+                if (
+                    spec.file_path == config_path
+                    and spec.target.startswith("/mcp_servers/")
+                    and spec.value is not DELETE
+                )
             }
         else:
             codex_mcp = {}

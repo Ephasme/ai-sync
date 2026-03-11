@@ -6,13 +6,14 @@ import pytest
 
 from ai_sync.display import PlainDisplay
 from ai_sync.planning import build_plan_context, default_plan_path, save_plan, validate_saved_plan
+from ai_sync.project import manifest_fingerprint
 from ai_sync.sync_runner import run_apply
 
 
 def _write_project(tmp_path: Path) -> tuple[Path, Path]:
     config_root = tmp_path / "config"
     config_root.mkdir()
-    (config_root / "config.toml").write_text('op_account = "x"\n', encoding="utf-8")
+    (config_root / "config.toml").write_text('op_account_identifier = "x.1password.com"\n', encoding="utf-8")
 
     source_root = tmp_path / "company-source"
     (source_root / "prompts").mkdir(parents=True)
@@ -66,6 +67,19 @@ def test_build_plan_context_marks_secret_backed_outputs(tmp_path: Path) -> None:
     context = build_plan_context(project_root, config_root, display)
     secret_targets = {action.target for action in context.plan.actions if action.secret_backed}
     assert str(project_root / ".env.ai-sync") in secret_targets
+
+
+def test_build_plan_context_prefers_local_manifest(tmp_path: Path) -> None:
+    config_root, project_root = _write_project(tmp_path)
+    local_manifest_path = project_root / ".ai-sync.local.yaml"
+    local_manifest_path.write_text("sources: {}\n", encoding="utf-8")
+
+    display = PlainDisplay()
+    context = build_plan_context(project_root, config_root, display)
+
+    assert context.manifest.agents == []
+    assert context.plan.manifest_path == str(local_manifest_path)
+    assert context.plan.manifest_fingerprint == manifest_fingerprint(local_manifest_path)
 
 
 def test_build_plan_context_targets_generated_rules_file(tmp_path: Path) -> None:
@@ -198,7 +212,10 @@ def test_saved_plan_invalidates_when_manifest_changes(tmp_path: Path) -> None:
     save_plan(context.plan, plan_path)
 
     manifest_path = project_root / ".ai-sync.yaml"
-    manifest_path.write_text(manifest_path.read_text(encoding="utf-8") + "settings:\n  mode: strict\n", encoding="utf-8")
+    manifest_path.write_text(
+        manifest_path.read_text(encoding="utf-8") + "settings:\n  mode: strict\n",
+        encoding="utf-8",
+    )
 
     current = build_plan_context(project_root, config_root, display)
     with pytest.raises(RuntimeError, match="Saved plan is no longer valid"):
@@ -208,7 +225,7 @@ def test_saved_plan_invalidates_when_manifest_changes(tmp_path: Path) -> None:
 def test_build_plan_context_rejects_colliding_commands(tmp_path: Path) -> None:
     config_root = tmp_path / "config"
     config_root.mkdir()
-    (config_root / "config.toml").write_text('op_account = "x"\n', encoding="utf-8")
+    (config_root / "config.toml").write_text('op_account_identifier = "x.1password.com"\n', encoding="utf-8")
 
     company = tmp_path / "company"
     (company / "commands").mkdir(parents=True)

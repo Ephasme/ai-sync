@@ -11,6 +11,12 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 ALIAS_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
+DEFAULT_PROJECT_MANIFEST_FILENAME = ".ai-sync.yaml"
+LOCAL_PROJECT_MANIFEST_FILENAME = ".ai-sync.local.yaml"
+PROJECT_MANIFEST_FILENAMES = (
+    LOCAL_PROJECT_MANIFEST_FILENAME,
+    DEFAULT_PROJECT_MANIFEST_FILENAME,
+)
 
 
 class SourceConfig(BaseModel):
@@ -82,21 +88,28 @@ def manifest_fingerprint(path: Path) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def resolve_project_manifest_path(project_root: Path) -> Path:
+    for filename in PROJECT_MANIFEST_FILENAMES:
+        manifest_path = project_root / filename
+        if manifest_path.exists():
+            return manifest_path
+    names = " or ".join(PROJECT_MANIFEST_FILENAMES)
+    raise RuntimeError(f"No {names} found in {project_root}. Create one first.")
+
+
 def resolve_project_manifest(project_root: Path) -> ProjectManifest:
-    ai_sync_yaml = project_root / ".ai-sync.yaml"
-    if not ai_sync_yaml.exists():
-        raise RuntimeError(f"No .ai-sync.yaml found in {project_root}. Create one first.")
-    data = _load_yaml_file(ai_sync_yaml)
+    manifest_path = resolve_project_manifest_path(project_root)
+    data = _load_yaml_file(manifest_path)
     try:
         return ProjectManifest.model_validate(data)
     except ValidationError as exc:
-        raise RuntimeError(f"Invalid .ai-sync.yaml: {exc}") from exc
+        raise RuntimeError(f"Invalid {manifest_path.name}: {exc}") from exc
 
 
 def find_project_root(start: Path | None = None) -> Path | None:
     current = (start or Path.cwd()).resolve()
     while True:
-        if (current / ".ai-sync.yaml").exists():
+        if any((current / filename).exists() for filename in PROJECT_MANIFEST_FILENAMES):
             return current
         parent = current.parent
         if parent == current:

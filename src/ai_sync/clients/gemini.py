@@ -151,7 +151,10 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
             for spec in specs
             if spec.target.startswith("/mcpServers/") and spec.value is not DELETE
         }
-        has_secrets = any(isinstance(entry, dict) and (entry.get("env") or entry.get("oauth")) for entry in gemini_mcp.values())
+        has_secrets = any(
+            isinstance(entry, dict) and (entry.get("env") or entry.get("oauth"))
+            for entry in gemini_mcp.values()
+        )
         if has_secrets:
             self._set_restrictive_permissions(settings_path)
             self._warn_plaintext_secrets(settings_path)
