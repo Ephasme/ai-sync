@@ -8,7 +8,7 @@ import pytest
 
 from ai_sync import cli, command_handlers
 from ai_sync.display import PlainDisplay
-from ai_sync.gitignore import SENSITIVE_PATHS
+from ai_sync.git_safety import SENSITIVE_PATHS
 from ai_sync.planning import PlanAction
 
 

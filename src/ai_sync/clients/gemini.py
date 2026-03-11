@@ -5,8 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ai_sync.state_store import StateStore
-from ai_sync.track_write import DELETE, WriteSpec, track_write_blocks
+from ai_sync.track_write import WriteSpec
 
 from .base import Client
 
@@ -19,10 +18,13 @@ class GeminiClient(Client):
     def name(self) -> str:
         return "gemini"
 
-    def build_agent_specs(self, slug: str, meta: dict, raw_content: str, prompt_src_path: Path) -> list[WriteSpec]:
-        agent_path = self.get_agents_dir() / f"{slug}.md"
+    def build_agent_specs(
+        self, alias: str, slug: str, meta: dict, raw_content: str, prompt_src_path: Path
+    ) -> list[WriteSpec]:
+        prefixed_slug = f"{alias}-{slug}"
+        agent_path = self.get_agents_dir() / f"{prefixed_slug}.md"
         content = f"""---
-name: {slug}
+name: {prefixed_slug}
 description: {json.dumps(meta.get("description", "AI Agent"))}
 model: auto
 tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
@@ -34,20 +36,20 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
             WriteSpec(
                 file_path=agent_path,
                 format="text",
-                target=f"ai-sync:agent:{slug}",
+                target=f"ai-sync:agent:{prefixed_slug}",
                 value=content,
             )
         ]
 
-    def write_agent(self, slug: str, meta: dict, raw_content: str, prompt_src_path: Path, store: StateStore) -> None:
-        track_write_blocks(self.build_agent_specs(slug, meta, raw_content, prompt_src_path), store)
-
-    def build_command_specs(self, slug: str, raw_content: str, command_src_path: Path) -> list[WriteSpec]:
+    def build_command_specs(
+        self, alias: str, slug: str, raw_content: str, command_src_path: Path
+    ) -> list[WriteSpec]:
         if command_src_path.suffix == ".mdc":
             target_dir = self.config_dir / "rules"
         else:
             target_dir = self.config_dir / "commands"
-        target_path = target_dir / command_src_path
+        prefixed = command_src_path.with_name(f"{alias}-{command_src_path.name}")
+        target_path = target_dir / prefixed
         return [
             WriteSpec(
                 file_path=target_path,
@@ -56,9 +58,6 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
                 value=raw_content,
             )
         ]
-
-    def write_command(self, slug: str, raw_content: str, command_src_path: Path, store: StateStore) -> None:
-        track_write_blocks(self.build_command_specs(slug, raw_content, command_src_path), store)
 
     def _build_mcp_entry(self, server_id: str, server: dict, secrets: dict) -> dict:
         secret_srv = self._get_secret_for_server(server_id, secrets)
@@ -113,51 +112,16 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
         return entry
 
     def build_mcp_specs(self, servers: dict, secrets: dict) -> list[WriteSpec]:
-        gemini_mcp: dict = {}
-        for sid, srv in servers.items():
-            entry = self._build_mcp_entry(sid, srv, secrets)
-            gemini_mcp[sid] = entry
         settings_path = self.config_dir / "settings.json"
         return [
             WriteSpec(
                 file_path=settings_path,
                 format="json",
                 target=f"/mcpServers/{sid}",
-                value=entry,
+                value=self._build_mcp_entry(sid, srv, secrets),
             )
-            for sid, entry in gemini_mcp.items()
+            for sid, srv in servers.items()
         ]
-
-    def sync_mcp(self, servers: dict, secrets: dict, store: StateStore) -> None:
-        settings_path = self.config_dir / "settings.json"
-        specs = self.build_mcp_specs(servers, secrets)
-        existing_targets = store.list_targets(settings_path, "json", "/mcpServers/")
-        desired_targets = {spec.target for spec in specs if spec.target.startswith("/mcpServers/")}
-        existing_ids = {t.split("/", 2)[2] for t in existing_targets if t.count("/") >= 2}
-        desired_ids = {t.split("/", 2)[2] for t in desired_targets if t.count("/") >= 2}
-        for sid in sorted(existing_ids - desired_ids):
-            specs.append(
-                WriteSpec(
-                    file_path=settings_path,
-                    format="json",
-                    target=f"/mcpServers/{sid}",
-                    value=DELETE,
-                )
-            )
-        if specs:
-            track_write_blocks(specs, store)
-        gemini_mcp = {
-            spec.target.split("/", 2)[2]: spec.value
-            for spec in specs
-            if spec.target.startswith("/mcpServers/") and spec.value is not DELETE
-        }
-        has_secrets = any(
-            isinstance(entry, dict) and (entry.get("env") or entry.get("oauth"))
-            for entry in gemini_mcp.values()
-        )
-        if has_secrets:
-            self._set_restrictive_permissions(settings_path)
-            self._warn_plaintext_secrets(settings_path)
 
     def _build_client_config(self, settings: dict) -> dict:
         out: dict = {}
@@ -230,17 +194,7 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
                     value=tools_cfg["sandbox"],
                 )
             )
-        if specs:
-            return specs
-        return []
-
-    def sync_client_config(self, settings: dict, store: StateStore) -> None:
-        specs = self.build_client_config_specs(settings)
-        if specs:
-            track_write_blocks(specs, store)
-
-    def post_apply(self) -> None:
-        return
+        return specs
 
     def build_instructions_specs(self, instructions_content: str) -> list[WriteSpec]:
         if not instructions_content.strip():
@@ -255,8 +209,3 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
                 value=section,
             )
         ]
-
-    def sync_instructions(self, instructions_content: str, store: StateStore) -> None:
-        specs = self.build_instructions_specs(instructions_content)
-        if specs:
-            track_write_blocks(specs, store)

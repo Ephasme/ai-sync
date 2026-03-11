@@ -77,12 +77,27 @@ class StateStore:
             return None
         return self._index.get(key)
 
-    def ensure_entry(self, file_path: Path, format: str, target: str) -> dict:
+    def ensure_entry(
+        self,
+        file_path: Path,
+        format: str,
+        target: str,
+        *,
+        kind: str | None = None,
+        resource: str | None = None,
+        source_alias: str | None = None,
+    ) -> dict:
         key = self._make_key(str(file_path), format, target)
         if not key:
             raise ValueError("Invalid state entry key")
         entry = self._index.get(key)
         if entry is not None:
+            if kind is not None:
+                entry["kind"] = kind
+            if resource is not None:
+                entry["resource"] = resource
+            if source_alias is not None:
+                entry["source_alias"] = source_alias
             return entry
         entry = {
             "file_path": str(file_path),
@@ -90,12 +105,32 @@ class StateStore:
             "target": target,
             "baseline": {},
         }
+        if kind is not None:
+            entry["kind"] = kind
+        if resource is not None:
+            entry["resource"] = resource
+        if source_alias is not None:
+            entry["source_alias"] = source_alias
         self._data["entries"].append(entry)
         self._index[key] = entry
         return entry
 
-    def record_baseline(self, file_path: Path, format: str, target: str, *, exists: bool, content: str | None) -> None:
-        entry = self.ensure_entry(file_path, format, target)
+    def record_baseline(
+        self,
+        file_path: Path,
+        format: str,
+        target: str,
+        *,
+        exists: bool,
+        content: str | None,
+        kind: str | None = None,
+        resource: str | None = None,
+        source_alias: str | None = None,
+    ) -> None:
+        entry = self.ensure_entry(
+            file_path, format, target,
+            kind=kind, resource=resource, source_alias=source_alias,
+        )
         if entry.get("baseline"):
             return
         if not exists:

@@ -10,7 +10,7 @@ from typing import Callable, Mapping, TextIO
 
 from .config_store import DEFAULT_SECRET_PROVIDER, ensure_layout, load_config, write_config
 from .display.base import Display
-from .gitignore import check_gitignore
+from .git_safety import check_gitignore, check_pre_commit_hook
 from .planning import (
     PlanContext,
     build_plan_context,
@@ -118,6 +118,7 @@ def run_apply_command(*, config_root: Path, display: Display, planfile: str | No
         mcp_manifest=prepared.plan_context.mcp_manifest,
         secrets=prepared.plan_context.secrets,
         runtime_env=prepared.plan_context.runtime_env,
+        resolved_sources=prepared.plan_context.resolved_sources,
         display=display,
     )
 
@@ -212,6 +213,14 @@ def run_doctor_command(*, config_root: Path, display: Display) -> int:
         display.print(f"  Gitignore: MISSING coverage for {', '.join(uncovered)}", style="warning")
     else:
         display.print("  Gitignore: OK", style="success")
+
+    hook_status = check_pre_commit_hook(project_root)
+    if hook_status == "installed":
+        display.print("  Pre-commit hook: OK", style="success")
+    elif hook_status == "missing":
+        display.print("  Pre-commit hook: not installed (run `ai-sync apply` to install)", style="warning")
+    else:
+        display.print("  Pre-commit hook: skipped (not a git repo)", style="dim")
 
     try:
         context = build_plan_context(project_root, config_root, display)

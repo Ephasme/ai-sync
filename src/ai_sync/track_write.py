@@ -244,7 +244,8 @@ def _is_full_file_target(marker_id: str) -> bool:
     return (
         marker_id.startswith("ai-sync:agent:")
         or marker_id.startswith("ai-sync:skill:")
-        or marker_id == "ai-sync:rules"
+        or marker_id.startswith("ai-sync:command:")
+        or marker_id.startswith("ai-sync:rule:")
         or marker_id == "ai-sync:env"
     )
 

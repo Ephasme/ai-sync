@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from ai_sync import sync_runner
+from ai_sync.artifacts import _agent_artifacts, _command_artifacts, _skill_artifacts
 from ai_sync.clients.base import Client
 from ai_sync.project import ProjectManifest, SourceConfig
-from ai_sync.state_store import StateStore
+from ai_sync.source_resolver import ResolvedSource
 from ai_sync.track_write import WriteSpec
 
 
@@ -27,34 +28,35 @@ class FakeDisplay:
 
 
 class DummyClient(Client):
-    def __init__(self, client_name: str, project_root: Path, base: Path, calls: list[str]) -> None:
+    def __init__(self, client_name: str, project_root: Path, calls: list[str]) -> None:
         super().__init__(project_root)
         self._name = client_name
-        self._base = base
         self.calls = calls
 
     @property
     def name(self) -> str:
         return self._name
 
-    @property
-    def config_dir(self) -> Path:
-        return self._base / f".{self._name}"
-
-    def build_agent_specs(self, slug: str, meta: dict, raw_content: str, prompt_src_path: Path) -> list[WriteSpec]:
+    def build_agent_specs(
+        self, alias: str, slug: str, meta: dict, raw_content: str, prompt_src_path: Path
+    ) -> list[WriteSpec]:
+        prefixed_slug = f"{alias}-{slug}"
         return [
             WriteSpec(
-                file_path=self.get_agents_dir() / slug / "prompt.md",
+                file_path=self.get_agents_dir() / prefixed_slug / "prompt.md",
                 format="text",
-                target=f"ai-sync:agent:{slug}",
+                target=f"ai-sync:agent:{prefixed_slug}",
                 value=raw_content,
             )
         ]
 
-    def build_command_specs(self, slug: str, raw_content: str, command_src_path: Path) -> list[WriteSpec]:
+    def build_command_specs(
+        self, alias: str, slug: str, raw_content: str, command_src_path: Path
+    ) -> list[WriteSpec]:
+        prefixed = command_src_path.with_name(f"{alias}-{command_src_path.name}")
         return [
             WriteSpec(
-                file_path=self.config_dir / "commands" / command_src_path,
+                file_path=self.config_dir / "commands" / prefixed,
                 format="text",
                 target=f"ai-sync:command:{slug}",
                 value=raw_content,
@@ -75,27 +77,15 @@ class DummyClient(Client):
     def build_client_config_specs(self, settings: dict) -> list[WriteSpec]:
         return []
 
-    def write_agent(self, slug: str, meta: dict, raw_content: str, prompt_src_path: Path, store: StateStore) -> None:
-        self.calls.append(f"write_agent:{self._name}:{slug}")
-        target = self.get_agents_dir() / slug / "prompt.md"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(raw_content, encoding="utf-8")
 
-    def write_command(self, slug: str, raw_content: str, command_src_path: Path, store: StateStore) -> None:
-        self.calls.append(f"write_command:{self._name}:{slug}")
-        target = self.config_dir / "commands" / command_src_path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(raw_content, encoding="utf-8")
-
-    def sync_mcp(self, servers: dict, secrets: dict, store: StateStore) -> None:
-        self.calls.append(f"sync_mcp:{self._name}:{len(servers)}")
-
-    def sync_client_config(self, settings: dict, store: StateStore) -> None:
-        self.calls.append(f"sync_client_config:{self._name}")
+def _resolved(alias: str, root: Path) -> ResolvedSource:
+    return ResolvedSource(
+        alias=alias, source=str(root), kind="local",
+        root=root, fingerprint="test", version=None,
+    )
 
 
 def _make_repo_root(tmp_path: Path) -> Path:
-    """Create a single source root in the flat layout."""
     root = tmp_path / "repo"
     (root / "prompts").mkdir(parents=True)
     (root / "skills" / "skill-one").mkdir(parents=True)
@@ -114,16 +104,23 @@ def _make_repo_root(tmp_path: Path) -> Path:
     return root
 
 
+# ---------------------------------------------------------------------------
+# run_apply integration tests
+# ---------------------------------------------------------------------------
+
+
 def test_run_apply_syncs_agents_and_mcp(monkeypatch, tmp_path: Path) -> None:
     repo_root = _make_repo_root(tmp_path)
     project_root = tmp_path / "project"
     project_root.mkdir()
     (project_root / ".ai-sync.yaml").write_text("sources: {}\n", encoding="utf-8")
+
     display = FakeDisplay()
     calls: list[str] = []
-    dummy_clients = [DummyClient("codex", project_root, tmp_path, calls)]
+    dummy_clients = [DummyClient("codex", project_root, calls)]
     monkeypatch.setattr(sync_runner, "create_clients", lambda pr: dummy_clients)
 
+    resolved_sources = {"company": _resolved("company", repo_root)}
     manifest = ProjectManifest(
         sources={"company": SourceConfig(source=str(repo_root))},
         agents=["company/agent"],
@@ -133,113 +130,190 @@ def test_run_apply_syncs_agents_and_mcp(monkeypatch, tmp_path: Path) -> None:
         settings={},
     )
     mcp_manifest = {"srv": {"method": "stdio", "command": "npx", "env": {"TOKEN": "abc"}}}
-    secrets: dict = {}
 
     result = sync_runner.run_apply(
         project_root=project_root,
         source_roots={"company": repo_root},
         manifest=manifest,
         mcp_manifest=mcp_manifest,
-        secrets=secrets,
+        secrets={},
         runtime_env={},
+        resolved_sources=resolved_sources,
         display=display,
     )
     assert result == 0
-    assert any("write_agent:codex:agent" in c for c in calls)
-    assert any("sync_mcp:codex:1" in c for c in calls)
+
+    agent_prompt = project_root / ".codex" / "agents" / "company-agent" / "prompt.md"
+    assert agent_prompt.exists()
+    assert "Do thing" in agent_prompt.read_text(encoding="utf-8")
+
+    mcp_config = project_root / ".codex" / "config.toml"
+    assert mcp_config.exists()
 
 
-def test_sync_skills_copies_root_files(tmp_path: Path, monkeypatch) -> None:
+def test_run_apply_writes_rules_and_index(monkeypatch, tmp_path: Path) -> None:
+    repo_root = _make_repo_root(tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    agents_md = project_root / "AGENTS.md"
+    agents_md.write_text("# User Instructions\n\nKeep this file.\n", encoding="utf-8")
+
+    display = FakeDisplay()
+    dummy_clients = [DummyClient("codex", project_root, [])]
+    monkeypatch.setattr(sync_runner, "create_clients", lambda pr: dummy_clients)
+
+    resolved_sources = {"company": _resolved("company", repo_root)}
+    manifest = ProjectManifest(
+        sources={"company": SourceConfig(source=str(repo_root))},
+        rules=["company/commit"],
+    )
+
+    result = sync_runner.run_apply(
+        project_root=project_root,
+        source_roots={"company": repo_root},
+        manifest=manifest,
+        mcp_manifest={},
+        secrets={},
+        runtime_env={},
+        resolved_sources=resolved_sources,
+        display=display,
+    )
+    assert result == 0
+
+    rule_file = project_root / ".ai-sync" / "rules" / "company-commit.md"
+    assert rule_file.exists()
+    assert "Commit rules" in rule_file.read_text(encoding="utf-8")
+
+    agents_content = agents_md.read_text(encoding="utf-8")
+    assert "# User Instructions" in agents_content
+    assert "company-commit" in agents_content
+
+
+def test_run_apply_removes_stale_rules(monkeypatch, tmp_path: Path) -> None:
+    repo_root = _make_repo_root(tmp_path)
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    agents_md = project_root / "AGENTS.md"
+    agents_md.write_text("# User Instructions\n", encoding="utf-8")
+
+    display = FakeDisplay()
+    dummy_clients = [DummyClient("codex", project_root, [])]
+    monkeypatch.setattr(sync_runner, "create_clients", lambda pr: dummy_clients)
+
+    resolved_sources = {"company": _resolved("company", repo_root)}
+
+    manifest_with = ProjectManifest(
+        sources={"company": SourceConfig(source=str(repo_root))},
+        rules=["company/commit"],
+    )
+    sync_runner.run_apply(
+        project_root=project_root,
+        source_roots={"company": repo_root},
+        manifest=manifest_with,
+        mcp_manifest={},
+        secrets={},
+        runtime_env={},
+        resolved_sources=resolved_sources,
+        display=display,
+    )
+
+    manifest_empty = ProjectManifest(
+        sources={"company": SourceConfig(source=str(repo_root))},
+    )
+    sync_runner.run_apply(
+        project_root=project_root,
+        source_roots={"company": repo_root},
+        manifest=manifest_empty,
+        mcp_manifest={},
+        secrets={},
+        runtime_env={},
+        resolved_sources=resolved_sources,
+        display=display,
+    )
+
+    rule_file = project_root / ".ai-sync" / "rules" / "company-commit.md"
+    assert not rule_file.exists()
+
+    agents_content = agents_md.read_text(encoding="utf-8")
+    assert "# User Instructions" in agents_content
+    assert "company-commit" not in agents_content
+
+
+# ---------------------------------------------------------------------------
+# Artifact factory unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_skill_artifacts_include_all_files(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     skill_root = repo_root / "skills" / "skill-one"
     skill_root.mkdir(parents=True)
     (skill_root / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
     (skill_root / "reference.md").write_text("ref\n", encoding="utf-8")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    display = FakeDisplay()
-    calls: list[str] = []
+
     project_root = tmp_path / "project"
     project_root.mkdir()
-    client = DummyClient("codex", project_root, tmp_path, calls)
-    store = StateStore(project_root)
+    client = DummyClient("codex", project_root, [])
+    resolved_sources = {"company": _resolved("company", repo_root)}
 
-    sync_runner.sync_skills({"company": repo_root}, ["company/skill-one"], [client], store, display)
-    target = client.get_skills_dir() / "skill-one" / "reference.md"
-    assert target.exists()
+    manifest = ProjectManifest(
+        sources={"company": SourceConfig(source=str(repo_root))},
+        skills=["company/skill-one"],
+    )
+
+    artifacts = _skill_artifacts(manifest, resolved_sources, [client])
+    assert len(artifacts) == 1
+
+    specs = artifacts[0].resolve()
+    names = {s.file_path.name for s in specs}
+    assert "SKILL.md" in names
+    assert "reference.md" in names
 
 
-def test_sync_commands_copies_files(tmp_path: Path, monkeypatch) -> None:
+def test_command_artifacts_produce_write_specs(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
-    commands_root = repo_root / "commands"
-    commands_root.mkdir(parents=True)
-    (commands_root / "shortcut.md").write_text("Do a thing\n", encoding="utf-8")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    display = FakeDisplay()
-    calls: list[str] = []
+    (repo_root / "commands").mkdir(parents=True)
+    (repo_root / "commands" / "shortcut.md").write_text("Do a thing\n", encoding="utf-8")
+
     project_root = tmp_path / "project"
     project_root.mkdir()
-    client = DummyClient("codex", project_root, tmp_path, calls)
-    store = StateStore(project_root)
+    client = DummyClient("codex", project_root, [])
+    resolved_sources = {"company": _resolved("company", repo_root)}
 
-    sync_runner.sync_commands({"company": repo_root}, ["company/shortcut.md"], [client], store, display)
-    target = client.config_dir / "commands" / "shortcut.md"
-    assert target.exists()
-    assert "write_command:codex:company/shortcut.md" in calls
+    manifest = ProjectManifest(
+        sources={"company": SourceConfig(source=str(repo_root))},
+        commands=["company/shortcut.md"],
+    )
+
+    artifacts = _command_artifacts(manifest, resolved_sources, [client])
+    assert len(artifacts) == 1
+    assert artifacts[0].kind == "command"
+
+    specs = artifacts[0].resolve()
+    assert len(specs) == 1
+    assert specs[0].value == "Do a thing\n"
+    assert "company-shortcut.md" in str(specs[0].file_path)
 
 
-def test_sync_agents_uses_scoped_source_alias(tmp_path: Path, monkeypatch) -> None:
+def test_agent_artifacts_use_scoped_alias(tmp_path: Path) -> None:
     repo_a = tmp_path / "repo-a"
     (repo_a / "prompts").mkdir(parents=True)
     (repo_a / "prompts" / "agent.md").write_text("## From A\n", encoding="utf-8")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    display = FakeDisplay()
-    calls: list[str] = []
+
     project_root = tmp_path / "project"
     project_root.mkdir()
-    client = DummyClient("codex", project_root, tmp_path, calls)
-    store = StateStore(project_root)
-
-    sync_runner.sync_agents({"company": repo_a}, ["company/agent"], [client], store, display)
-
-    written = client.get_agents_dir() / "agent" / "prompt.md"
-    assert written.read_text(encoding="utf-8") == "## From A\n"
-
-
-def test_sync_rules_writes_generated_file_and_preserves_agents_md(tmp_path: Path, monkeypatch) -> None:
-    repo_root = _make_repo_root(tmp_path)
-    monkeypatch.setenv("HOME", str(tmp_path))
+    client = DummyClient("codex", project_root, [])
     display = FakeDisplay()
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-    agents_md = project_root / "AGENTS.md"
-    agents_md.write_text("# User Instructions\n\nKeep this file.\n", encoding="utf-8")
-    store = StateStore(project_root)
+    resolved_sources = {"company": _resolved("company", repo_a)}
 
-    sync_runner.sync_rules(project_root, {"company": repo_root}, ["company/commit"], False, store, display)
+    manifest = ProjectManifest(
+        sources={"company": SourceConfig(source=str(repo_a))},
+        agents=["company/agent"],
+    )
 
-    generated = project_root / "AGENTS.generated.md"
-    assert generated.read_text(encoding="utf-8") == "Commit rules\n"
+    artifacts = _agent_artifacts(manifest, resolved_sources, [client], display)
+    assert len(artifacts) == 1
 
-    agents_content = agents_md.read_text(encoding="utf-8")
-    assert "# User Instructions" in agents_content
-    assert "[`AGENTS.generated.md`](./AGENTS.generated.md)" in agents_content
-    assert "Commit rules" not in agents_content
-
-
-def test_sync_rules_empty_selection_removes_generated_file_but_keeps_agents_md(tmp_path: Path, monkeypatch) -> None:
-    repo_root = _make_repo_root(tmp_path)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    display = FakeDisplay()
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-    agents_md = project_root / "AGENTS.md"
-    agents_md.write_text("# User Instructions\n", encoding="utf-8")
-    store = StateStore(project_root)
-
-    sync_runner.sync_rules(project_root, {"company": repo_root}, ["company/commit"], False, store, display)
-    sync_runner.sync_rules(project_root, {"company": repo_root}, [], False, store, display)
-
-    assert not (project_root / "AGENTS.generated.md").exists()
-    agents_content = agents_md.read_text(encoding="utf-8")
-    assert agents_content == "# User Instructions\n"
-    assert "AGENTS.generated.md" not in agents_content
+    specs = artifacts[0].resolve()
+    assert specs[0].value == "## From A\n"
+    assert "company-agent" in str(specs[0].file_path)

@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ai_sync.state_store import StateStore
-from ai_sync.track_write import DELETE, WriteSpec, track_write_blocks
+from ai_sync.track_write import WriteSpec
 
 from .base import Client
 
@@ -18,14 +17,17 @@ class CodexClient(Client):
     def name(self) -> str:
         return "codex"
 
-    def build_agent_specs(self, slug: str, meta: dict, raw_content: str, prompt_src_path: Path) -> list[WriteSpec]:
-        agent_dir = self.get_agents_dir() / slug
+    def build_agent_specs(
+        self, alias: str, slug: str, meta: dict, raw_content: str, prompt_src_path: Path
+    ) -> list[WriteSpec]:
+        prefixed_slug = f"{alias}-{slug}"
+        agent_dir = self.get_agents_dir() / prefixed_slug
         codex_prompt_path = agent_dir / "prompt.md"
         return [
             WriteSpec(
                 file_path=codex_prompt_path,
                 format="text",
-                target=f"ai-sync:agent:{slug}:prompt",
+                target=f"ai-sync:agent:{prefixed_slug}:prompt",
                 value=raw_content,
             ),
             WriteSpec(
@@ -54,15 +56,15 @@ class CodexClient(Client):
             ),
         ]
 
-    def write_agent(self, slug: str, meta: dict, raw_content: str, prompt_src_path: Path, store: StateStore) -> None:
-        track_write_blocks(self.build_agent_specs(slug, meta, raw_content, prompt_src_path), store)
-
-    def build_command_specs(self, slug: str, raw_content: str, command_src_path: Path) -> list[WriteSpec]:
+    def build_command_specs(
+        self, alias: str, slug: str, raw_content: str, command_src_path: Path
+    ) -> list[WriteSpec]:
         if command_src_path.suffix == ".mdc":
             target_dir = self.config_dir / "rules"
         else:
             target_dir = self.config_dir / "commands"
-        target_path = target_dir / command_src_path
+        prefixed = command_src_path.with_name(f"{alias}-{command_src_path.name}")
+        target_path = target_dir / prefixed
         return [
             WriteSpec(
                 file_path=target_path,
@@ -71,9 +73,6 @@ class CodexClient(Client):
                 value=raw_content,
             )
         ]
-
-    def write_command(self, slug: str, raw_content: str, command_src_path: Path, store: StateStore) -> None:
-        track_write_blocks(self.build_command_specs(slug, raw_content, command_src_path), store)
 
     def _build_mcp_entry(self, server_id: str, server: dict, secrets: dict) -> dict:
         secret_srv = self._get_secret_for_server(server_id, secrets)
@@ -117,72 +116,16 @@ class CodexClient(Client):
         return table
 
     def build_mcp_specs(self, servers: dict, secrets: dict) -> list[WriteSpec]:
-        codex_mcp: dict = {}
-        for sid, srv in servers.items():
-            entry = self._build_mcp_entry(sid, srv, secrets)
-            codex_mcp[sid] = entry
-
         config_path = self.config_dir / "config.toml"
-        specs = [
+        return [
             WriteSpec(
                 file_path=config_path,
                 format="toml",
                 target=f"/mcp_servers/{sid}",
-                value=entry,
+                value=self._build_mcp_entry(sid, srv, secrets),
             )
-            for sid, entry in codex_mcp.items()
+            for sid, srv in servers.items()
         ]
-        specs.append(
-            WriteSpec(
-                file_path=self.config_dir / "mcp.env",
-                format="text",
-                target="ai-sync:codex-mcp-env",
-                value=DELETE,
-            )
-        )
-        return specs
-
-    def sync_mcp(self, servers: dict, secrets: dict, store: StateStore) -> None:
-        config_path = self.config_dir / "config.toml"
-        specs = self.build_mcp_specs(servers, secrets)
-        existing_targets = store.list_targets(config_path, "toml", "/mcp_servers/")
-        desired_targets = {
-            spec.target
-            for spec in specs
-            if spec.file_path == config_path and spec.target.startswith("/mcp_servers/")
-        }
-        existing_ids = {t.split("/", 2)[2] for t in existing_targets if t.count("/") >= 2}
-        desired_ids = {t.split("/", 2)[2] for t in desired_targets if t.count("/") >= 2}
-        for sid in sorted(existing_ids - desired_ids):
-            specs.append(
-                WriteSpec(
-                    file_path=config_path,
-                    format="toml",
-                    target=f"/mcp_servers/{sid}",
-                    value=DELETE,
-                )
-            )
-        if specs:
-            track_write_blocks(specs, store)
-        if any(spec.file_path == config_path and spec.target.startswith("/mcp_servers/") for spec in specs):
-            codex_mcp = {
-                spec.target.split("/", 2)[2]: spec.value
-                for spec in specs
-                if (
-                    spec.file_path == config_path
-                    and spec.target.startswith("/mcp_servers/")
-                    and spec.value is not DELETE
-                )
-            }
-        else:
-            codex_mcp = {}
-        if any(isinstance(e, dict) and e.get("env") for e in codex_mcp.values()):
-            self._set_restrictive_permissions(config_path)
-            self._warn_plaintext_secrets(config_path)
-
-        mcp_env_path = self.config_dir / "mcp.env"
-        if mcp_env_path.exists() and not mcp_env_path.read_text(encoding="utf-8").strip():
-            mcp_env_path.unlink(missing_ok=True)
 
     def _build_client_config(self, settings: dict) -> dict:
         out: dict = {}
@@ -262,11 +205,6 @@ class CodexClient(Client):
             )
         return specs
 
-    def sync_client_config(self, settings: dict, store: StateStore) -> None:
-        specs = self.build_client_config_specs(settings)
-        if specs:
-            track_write_blocks(specs, store)
-
     def build_instructions_specs(self, instructions_content: str) -> list[WriteSpec]:
         if not instructions_content.strip():
             return []
@@ -279,11 +217,3 @@ class CodexClient(Client):
                 value=instructions_content.strip(),
             )
         ]
-
-    def sync_instructions(self, instructions_content: str, store: StateStore) -> None:
-        specs = self.build_instructions_specs(instructions_content)
-        if specs:
-            track_write_blocks(specs, store)
-
-    def post_apply(self) -> None:
-        return

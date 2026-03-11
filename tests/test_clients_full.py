@@ -9,10 +9,7 @@ from ai_sync.clients.codex import CodexClient
 from ai_sync.clients.cursor import CursorClient
 from ai_sync.clients.gemini import GeminiClient
 from ai_sync.state_store import StateStore
-
-# ---------------------------------------------------------------------------
-# sync_mcp + sync_client_config (integration)
-# ---------------------------------------------------------------------------
+from ai_sync.track_write import track_write_blocks
 
 
 def test_codex_sync_mcp_and_config(monkeypatch, tmp_path: Path) -> None:
@@ -20,7 +17,7 @@ def test_codex_sync_mcp_and_config(monkeypatch, tmp_path: Path) -> None:
     store = StateStore(tmp_path)
     client = CodexClient(tmp_path)
     servers = {
-        "s1": {
+        "default-s1": {
             "method": "stdio",
             "command": "npx",
             "args": ["x"],
@@ -28,7 +25,8 @@ def test_codex_sync_mcp_and_config(monkeypatch, tmp_path: Path) -> None:
             "bearer_token_env_var": "TOKEN",
         }
     }
-    client.sync_mcp(servers, {"servers": {}}, store)
+    specs = client.build_mcp_specs(servers, {"servers": {}})
+    track_write_blocks(specs, store)
     config_path = tmp_path / ".codex" / "config.toml"
     assert config_path.exists()
     data = tomllib.loads(config_path.read_text(encoding="utf-8"))
@@ -36,7 +34,8 @@ def test_codex_sync_mcp_and_config(monkeypatch, tmp_path: Path) -> None:
     mcp_env = tmp_path / ".codex" / "mcp.env"
     assert not mcp_env.exists()
 
-    client.sync_client_config({"mode": "yolo", "subagents": True}, store)
+    specs = client.build_client_config_specs({"mode": "yolo", "subagents": True})
+    track_write_blocks(specs, store)
     data = tomllib.loads(config_path.read_text(encoding="utf-8"))
     assert data["approval_policy"] == "never"
     assert data["sandbox_mode"] == "danger-full-access"
@@ -47,7 +46,7 @@ def test_cursor_sync_mcp_and_config(monkeypatch, tmp_path: Path) -> None:
     store = StateStore(tmp_path)
     client = CursorClient(tmp_path)
     servers = {
-        "s1": {
+        "default-s1": {
             "method": "http",
             "url": "https://x",
             "trust": True,
@@ -56,13 +55,16 @@ def test_cursor_sync_mcp_and_config(monkeypatch, tmp_path: Path) -> None:
             "timeout_seconds": 1,
         }
     }
-    secrets = {"servers": {"s1": {"auth": {"token": "secret"}}}}
-    client.sync_mcp(servers, secrets, store)
+    secrets = {"servers": {"default-s1": {"auth": {"token": "secret"}}}}
+    specs = client.build_mcp_specs(servers, secrets)
+    track_write_blocks(specs, store)
     mcp_path = tmp_path / ".cursor" / "mcp.json"
     data = json.loads(mcp_path.read_text(encoding="utf-8"))
-    assert data["mcpServers"]["s1"]["url"] == "https://x"
-    assert data["mcpServers"]["s1"]["auth"]["token"] == "secret"
-    client.sync_client_config({"mode": "yolo"}, store)
+    assert data["mcpServers"]["default-s1"]["url"] == "https://x"
+    assert data["mcpServers"]["default-s1"]["auth"]["token"] == "secret"
+
+    specs = client.build_client_config_specs({"mode": "yolo"})
+    track_write_blocks(specs, store)
     cfg = json.loads((tmp_path / ".cursor" / "cli-config.json").read_text(encoding="utf-8"))
     assert "Shell(*)" in cfg["permissions"]["allow"]
 
@@ -72,22 +74,18 @@ def test_gemini_sync_mcp(monkeypatch, tmp_path: Path) -> None:
     store = StateStore(tmp_path)
     client = GeminiClient(tmp_path)
     servers = {
-        "s1": {
+        "default-s1": {
             "method": "http",
             "httpUrl": "https://x",
             "oauth": {"enabled": True, "scopes": ["a"]},
         }
     }
-    secrets = {"servers": {"s1": {"oauth": {"clientId": "id", "clientSecret": "secret"}}}}
-    client.sync_mcp(servers, secrets, store)
+    secrets = {"servers": {"default-s1": {"oauth": {"clientId": "id", "clientSecret": "secret"}}}}
+    specs = client.build_mcp_specs(servers, secrets)
+    track_write_blocks(specs, store)
     settings_path = tmp_path / ".gemini" / "settings.json"
     data = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert data["mcpServers"]["s1"]["oauth"]["clientId"] == "id"
-
-
-# ---------------------------------------------------------------------------
-# write_agent
-# ---------------------------------------------------------------------------
+    assert data["mcpServers"]["default-s1"]["oauth"]["clientId"] == "id"
 
 
 def test_codex_write_agent(monkeypatch, tmp_path: Path) -> None:
@@ -95,8 +93,9 @@ def test_codex_write_agent(monkeypatch, tmp_path: Path) -> None:
     store = StateStore(tmp_path)
     client = CodexClient(tmp_path)
     meta = {"reasoning_effort": "medium", "web_search": False}
-    client.write_agent("my-agent", meta, "Do the thing", Path("agent.md"), store)
-    agent_dir = tmp_path / ".codex" / "agents" / "my-agent"
+    specs = client.build_agent_specs("default", "my-agent", meta, "Do the thing", Path("agent.md"))
+    track_write_blocks(specs, store)
+    agent_dir = tmp_path / ".codex" / "agents" / "default-my-agent"
     prompt = agent_dir / "prompt.md"
     assert prompt.exists()
     assert "Do the thing" in prompt.read_text(encoding="utf-8")
@@ -111,8 +110,9 @@ def test_cursor_write_agent(monkeypatch, tmp_path: Path) -> None:
     store = StateStore(tmp_path)
     client = CursorClient(tmp_path)
     meta = {"name": "my-agent", "description": "A test agent", "is_background": True}
-    client.write_agent("my-agent", meta, "Task content", Path("agent.md"), store)
-    agent_path = tmp_path / ".cursor" / "agents" / "my-agent.md"
+    specs = client.build_agent_specs("default", "my-agent", meta, "Task content", Path("agent.md"))
+    track_write_blocks(specs, store)
+    agent_path = tmp_path / ".cursor" / "agents" / "default-my-agent.md"
     assert agent_path.exists()
     content = agent_path.read_text(encoding="utf-8")
     assert "Task content" in content
@@ -125,26 +125,23 @@ def test_gemini_write_agent(monkeypatch, tmp_path: Path) -> None:
     store = StateStore(tmp_path)
     client = GeminiClient(tmp_path)
     meta = {"description": "Test desc", "tools": ["search", "browse"]}
-    client.write_agent("my-agent", meta, "Prompt body", Path("agent.md"), store)
-    agent_path = tmp_path / ".gemini" / "agents" / "my-agent.md"
+    specs = client.build_agent_specs("default", "my-agent", meta, "Prompt body", Path("agent.md"))
+    track_write_blocks(specs, store)
+    agent_path = tmp_path / ".gemini" / "agents" / "default-my-agent.md"
     assert agent_path.exists()
     content = agent_path.read_text(encoding="utf-8")
     assert "Prompt body" in content
-    assert "my-agent" in content
+    assert "default-my-agent" in content
     assert '["search", "browse"]' in content
-
-
-# ---------------------------------------------------------------------------
-# write_command
-# ---------------------------------------------------------------------------
 
 
 def test_cursor_write_command(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     store = StateStore(tmp_path)
     client = CursorClient(tmp_path)
-    client.write_command("shortcut.md", "Run command", Path("shortcut.md"), store)
-    cmd_path = tmp_path / ".cursor" / "commands" / "shortcut.md"
+    specs = client.build_command_specs("default", "shortcut", "Run command", Path("shortcut.md"))
+    track_write_blocks(specs, store)
+    cmd_path = tmp_path / ".cursor" / "commands" / "default-shortcut.md"
     assert cmd_path.exists()
     assert "Run command" in cmd_path.read_text(encoding="utf-8")
 
@@ -153,8 +150,9 @@ def test_cursor_write_command_mdc(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     store = StateStore(tmp_path)
     client = CursorClient(tmp_path)
-    client.write_command("guide.mdc", "Guide content", Path("guide.mdc"), store)
-    cmd_path = tmp_path / ".cursor" / "rules" / "guide.mdc"
+    specs = client.build_command_specs("default", "guide", "Guide content", Path("guide.mdc"))
+    track_write_blocks(specs, store)
+    cmd_path = tmp_path / ".cursor" / "rules" / "default-guide.mdc"
     assert cmd_path.exists()
     assert "Guide content" in cmd_path.read_text(encoding="utf-8")
 
@@ -163,8 +161,9 @@ def test_codex_write_command(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     store = StateStore(tmp_path)
     client = CodexClient(tmp_path)
-    client.write_command("shortcut.md", "Run command", Path("shortcut.md"), store)
-    cmd_path = tmp_path / ".codex" / "commands" / "shortcut.md"
+    specs = client.build_command_specs("default", "shortcut", "Run command", Path("shortcut.md"))
+    track_write_blocks(specs, store)
+    cmd_path = tmp_path / ".codex" / "commands" / "default-shortcut.md"
     assert cmd_path.exists()
     assert "Run command" in cmd_path.read_text(encoding="utf-8")
 
@@ -173,22 +172,19 @@ def test_gemini_write_command(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     store = StateStore(tmp_path)
     client = GeminiClient(tmp_path)
-    client.write_command("shortcut.md", "Run command", Path("shortcut.md"), store)
-    cmd_path = tmp_path / ".gemini" / "commands" / "shortcut.md"
+    specs = client.build_command_specs("default", "shortcut", "Run command", Path("shortcut.md"))
+    track_write_blocks(specs, store)
+    cmd_path = tmp_path / ".gemini" / "commands" / "default-shortcut.md"
     assert cmd_path.exists()
     assert "Run command" in cmd_path.read_text(encoding="utf-8")
-
-
-# ---------------------------------------------------------------------------
-# sync_client_config — mode variations
-# ---------------------------------------------------------------------------
 
 
 def test_codex_client_config_normal(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     store = StateStore(tmp_path)
     client = CodexClient(tmp_path)
-    client.sync_client_config({"mode": "normal", "subagents": True}, store)
+    specs = client.build_client_config_specs({"mode": "normal", "subagents": True})
+    track_write_blocks(specs, store)
     data = tomllib.loads((tmp_path / ".codex" / "config.toml").read_text(encoding="utf-8"))
     assert data["approval_policy"] == "untrusted"
     assert data["sandbox_mode"] == "danger-full-access"
@@ -199,7 +195,8 @@ def test_codex_client_config_strict(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     store = StateStore(tmp_path)
     client = CodexClient(tmp_path)
-    client.sync_client_config({"mode": "strict"}, store)
+    specs = client.build_client_config_specs({"mode": "strict"})
+    track_write_blocks(specs, store)
     data = tomllib.loads((tmp_path / ".codex" / "config.toml").read_text(encoding="utf-8"))
     assert data["approval_policy"] == "on-request"
     assert data["sandbox_mode"] == "read-only"
@@ -209,7 +206,8 @@ def test_codex_client_config_experimental(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     store = StateStore(tmp_path)
     client = CodexClient(tmp_path)
-    client.sync_client_config({"mode": "normal", "experimental": True}, store)
+    specs = client.build_client_config_specs({"mode": "normal", "experimental": True})
+    track_write_blocks(specs, store)
     data = tomllib.loads((tmp_path / ".codex" / "config.toml").read_text(encoding="utf-8"))
     assert data["suppress_unstable_features_warning"] is True
 
@@ -218,7 +216,8 @@ def test_cursor_client_config_strict(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     store = StateStore(tmp_path)
     client = CursorClient(tmp_path)
-    client.sync_client_config({"mode": "strict"}, store)
+    specs = client.build_client_config_specs({"mode": "strict"})
+    track_write_blocks(specs, store)
     cfg = json.loads((tmp_path / ".cursor" / "cli-config.json").read_text(encoding="utf-8"))
     assert cfg["permissions"]["allow"] == []
 
@@ -227,7 +226,8 @@ def test_gemini_client_config_normal(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     store = StateStore(tmp_path)
     client = GeminiClient(tmp_path)
-    client.sync_client_config({"mode": "normal", "subagents": True}, store)
+    specs = client.build_client_config_specs({"mode": "normal", "subagents": True})
+    track_write_blocks(specs, store)
     data = json.loads((tmp_path / ".gemini" / "settings.json").read_text(encoding="utf-8"))
     assert data["general"]["defaultApprovalMode"] == "auto_edit"
     assert data["experimental"]["enableAgents"] is True
@@ -238,7 +238,8 @@ def test_gemini_client_config_strict(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     store = StateStore(tmp_path)
     client = GeminiClient(tmp_path)
-    client.sync_client_config({"mode": "strict"}, store)
+    specs = client.build_client_config_specs({"mode": "strict"})
+    track_write_blocks(specs, store)
     data = json.loads((tmp_path / ".gemini" / "settings.json").read_text(encoding="utf-8"))
     assert data["general"]["defaultApprovalMode"] == "plan"
     assert data["experimental"]["plan"] is True
@@ -249,41 +250,34 @@ def test_gemini_client_config_yolo(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     store = StateStore(tmp_path)
     client = GeminiClient(tmp_path)
-    client.sync_client_config({"mode": "yolo"}, store)
+    specs = client.build_client_config_specs({"mode": "yolo"})
+    track_write_blocks(specs, store)
     data = json.loads((tmp_path / ".gemini" / "settings.json").read_text(encoding="utf-8"))
     assert data["general"]["defaultApprovalMode"] == "auto_edit"
     assert data["tools"]["sandbox"] is False
 
 
-# ---------------------------------------------------------------------------
-# sync_mcp — stale server cleanup
-# ---------------------------------------------------------------------------
-
-
-def test_codex_sync_mcp_cleans_stale_servers(monkeypatch, tmp_path: Path) -> None:
+def test_codex_build_mcp_specs_multiple_servers(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     store = StateStore(tmp_path)
     client = CodexClient(tmp_path)
-    client.sync_mcp(
-        {"s1": {"method": "stdio", "command": "a"}, "s2": {"method": "stdio", "command": "b"}},
-        {"servers": {}},
-        store,
-    )
+    servers = {
+        "default-s1": {"method": "stdio", "command": "a"},
+        "default-s2": {"method": "stdio", "command": "b"},
+    }
+    specs = client.build_mcp_specs(servers, {"servers": {}})
+    track_write_blocks(specs, store)
     config_path = tmp_path / ".codex" / "config.toml"
     data = tomllib.loads(config_path.read_text(encoding="utf-8"))
-    assert "s1" in data["mcp_servers"]
-    assert "s2" in data["mcp_servers"]
-
-    client.sync_mcp({"s1": {"method": "stdio", "command": "a"}}, {"servers": {}}, store)
-    data = tomllib.loads(config_path.read_text(encoding="utf-8"))
-    assert "s1" in data["mcp_servers"]
-    assert "s2" not in data["mcp_servers"]
+    assert "default-s1" in data["mcp_servers"]
+    assert "default-s2" in data["mcp_servers"]
 
 
-def test_codex_sync_mcp_no_bearer_cleans_env(monkeypatch, tmp_path: Path) -> None:
+def test_codex_build_mcp_specs_no_bearer(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     store = StateStore(tmp_path)
     client = CodexClient(tmp_path)
-    client.sync_mcp({"s1": {"method": "stdio", "command": "a"}}, {"servers": {}}, store)
+    specs = client.build_mcp_specs({"default-s1": {"method": "stdio", "command": "a"}}, {"servers": {}})
+    track_write_blocks(specs, store)
     mcp_env = tmp_path / ".codex" / "mcp.env"
     assert not mcp_env.exists() or not mcp_env.read_text(encoding="utf-8").strip()

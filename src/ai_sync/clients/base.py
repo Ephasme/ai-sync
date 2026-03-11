@@ -11,7 +11,6 @@ from pathlib import Path
 import tomli
 import tomli_w
 
-from ai_sync.state_store import StateStore
 from ai_sync.track_write import WriteSpec
 
 
@@ -78,47 +77,27 @@ class Client(ABC):
         return secrets.get("servers", {}).get(server_id, {})
 
     @staticmethod
-    def _set_restrictive_permissions(path: Path) -> None:
+    def set_restrictive_permissions(path: Path) -> None:
         try:
             os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
         except OSError as exc:
             print(f"  Warning: Could not set restrictive permissions on {path}: {exc}")
 
-    @staticmethod
-    def _warn_plaintext_secrets(path: Path) -> None:
-        print(f"  Warning: Secrets written in plaintext to {path}. Consider using a secrets manager.")
+    @abstractmethod
+    def build_agent_specs(
+        self, alias: str, slug: str, meta: dict, raw_content: str, prompt_src_path: Path
+    ) -> list[WriteSpec]: ...
 
     @abstractmethod
-    def write_agent(
-        self, slug: str, meta: dict, raw_content: str, prompt_src_path: Path, store: StateStore
-    ) -> None: ...
-
-    def build_agent_specs(self, slug: str, meta: dict, raw_content: str, prompt_src_path: Path) -> list[WriteSpec]:
-        raise NotImplementedError
+    def build_command_specs(
+        self, alias: str, slug: str, raw_content: str, command_src_path: Path
+    ) -> list[WriteSpec]: ...
 
     @abstractmethod
-    def write_command(self, slug: str, raw_content: str, command_src_path: Path, store: StateStore) -> None: ...
-
-    def build_command_specs(self, slug: str, raw_content: str, command_src_path: Path) -> list[WriteSpec]:
-        raise NotImplementedError
+    def build_mcp_specs(self, servers: dict, secrets: dict) -> list[WriteSpec]: ...
 
     @abstractmethod
-    def sync_mcp(self, servers: dict, secrets: dict, store: StateStore) -> None: ...
-
-    def build_mcp_specs(self, servers: dict, secrets: dict) -> list[WriteSpec]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def sync_client_config(self, settings: dict, store: StateStore) -> None: ...
-
-    def build_client_config_specs(self, settings: dict) -> list[WriteSpec]:
-        raise NotImplementedError
-
-    def sync_instructions(self, instructions_content: str, store: StateStore) -> None:
-        pass
+    def build_client_config_specs(self, settings: dict) -> list[WriteSpec]: ...
 
     def build_instructions_specs(self, instructions_content: str) -> list[WriteSpec]:
         return []
-
-    def post_apply(self) -> None:
-        """Deprecated hook kept for compatibility; apply stays project-scoped in V1."""

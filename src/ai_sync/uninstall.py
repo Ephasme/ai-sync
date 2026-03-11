@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from pathlib import Path
 
-import tomli
-import tomli_w
 import yaml
 
+from .git_safety import remove_pre_commit_hook
 from .helpers import ensure_dir
 from .path_ops import delete_at_path, set_at_path
 from .state_store import StateStore
-from .track_write import _is_full_file_target, marker_bounds
+from .track_write import (
+    _dump_structured,
+    _is_full_file_target,
+    _parse_structured,
+    _write_atomic,
+    marker_bounds,
+)
 
 
 def run_uninstall(project_root: Path, *, apply: bool) -> int:
@@ -69,9 +73,9 @@ def run_uninstall(project_root: Path, *, apply: bool) -> int:
                     if isinstance(blob_id, str):
                         blob = store.fetch_blob(blob_id)
                         if blob is not None:
-                            content = restore_marker_block(content, marker_id, blob, file_path)
+                            content = _restore_marker_block(content, marker_id, blob, file_path)
                 else:
-                    content = remove_marker_block(content, marker_id, file_path)
+                    content = _remove_marker_block(content, marker_id, file_path)
             if content != original:
                 did_change = True
                 if apply:
@@ -111,6 +115,8 @@ def run_uninstall(project_root: Path, *, apply: bool) -> int:
             print(f"Skipping unsupported format in state: {fmt}")
 
     if apply:
+        if remove_pre_commit_hook(project_root):
+            print("Removed ai-sync pre-commit hook.")
         store.delete_state()
         print("ai-sync state removed.")
     if not apply:
@@ -122,7 +128,7 @@ def run_uninstall(project_root: Path, *, apply: bool) -> int:
     return 0
 
 
-def restore_marker_block(content: str, marker_id: str, baseline_block: str, file_path: Path) -> str:
+def _restore_marker_block(content: str, marker_id: str, baseline_block: str, file_path: Path) -> str:
     begin, end = marker_bounds(file_path, marker_id)
     pattern = re.compile(rf"{re.escape(begin)}.*?{re.escape(end)}", re.DOTALL)
     if pattern.search(content):
@@ -132,45 +138,11 @@ def restore_marker_block(content: str, marker_id: str, baseline_block: str, file
     return baseline_block + "\n"
 
 
-def remove_marker_block(content: str, marker_id: str, file_path: Path) -> str:
+def _remove_marker_block(content: str, marker_id: str, file_path: Path) -> str:
     begin, end = marker_bounds(file_path, marker_id)
     pattern = re.compile(rf"{re.escape(begin)}.*?{re.escape(end)}\n?", re.DOTALL)
     cleaned = pattern.sub("", content)
     return cleaned.strip() + "\n" if cleaned.strip() else ""
-
-
-def _parse_structured(raw: str, fmt: str) -> dict | list:
-    if not raw.strip():
-        return {}
-    if fmt == "json":
-        try:
-            data = json.loads(raw)
-            return data if isinstance(data, (dict, list)) else {}
-        except json.JSONDecodeError:
-            return {}
-    if fmt == "toml":
-        try:
-            data = tomli.loads(raw)
-            return data if isinstance(data, dict) else {}
-        except tomli.TOMLDecodeError:
-            return {}
-    if fmt == "yaml":
-        try:
-            data = yaml.safe_load(raw)
-            return data if isinstance(data, (dict, list)) else {}
-        except yaml.YAMLError:
-            return {}
-    raise ValueError(f"Unsupported format: {fmt}")
-
-
-def _dump_structured(data: object, fmt: str) -> str:
-    if fmt == "json":
-        return json.dumps(data, indent=2)
-    if fmt == "toml":
-        return tomli_w.dumps(data if isinstance(data, dict) else {})
-    if fmt == "yaml":
-        return yaml.safe_dump(data, sort_keys=False).rstrip() + "\n"
-    raise ValueError(f"Unsupported format: {fmt}")
 
 
 def _deserialize_value(blob: str) -> object:
@@ -189,14 +161,3 @@ def _is_empty_structured(data: object) -> bool:
     if isinstance(data, list):
         return len(data) == 0
     return True
-
-
-def _write_atomic(path: Path, content: str) -> None:
-    tmp = path.with_suffix(f"{path.suffix}.{os.getpid()}.tmp")
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(content)
-        tmp.replace(path)
-    except BaseException:
-        tmp.unlink(missing_ok=True)
-        raise

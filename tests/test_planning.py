@@ -61,6 +61,19 @@ def _write_project(tmp_path: Path) -> tuple[Path, Path]:
     return config_root, project_root
 
 
+def _run_apply_from_context(context, project_root, display):
+    return run_apply(
+        project_root=project_root,
+        source_roots={alias: source.root for alias, source in context.resolved_sources.items()},
+        manifest=context.manifest,
+        mcp_manifest=context.mcp_manifest,
+        secrets=context.secrets,
+        runtime_env=context.runtime_env,
+        resolved_sources=context.resolved_sources,
+        display=display,
+    )
+
+
 def test_build_plan_context_marks_secret_backed_outputs(tmp_path: Path) -> None:
     config_root, project_root = _write_project(tmp_path)
     display = PlainDisplay()
@@ -82,16 +95,16 @@ def test_build_plan_context_prefers_local_manifest(tmp_path: Path) -> None:
     assert context.plan.manifest_fingerprint == manifest_fingerprint(local_manifest_path)
 
 
-def test_build_plan_context_targets_generated_rules_file(tmp_path: Path) -> None:
+def test_build_plan_context_targets_rule_files(tmp_path: Path) -> None:
     config_root, project_root = _write_project(tmp_path)
     display = PlainDisplay()
     context = build_plan_context(project_root, config_root, display)
 
     rule_targets = {action.target for action in context.plan.actions if action.kind == "rule"}
-    assert rule_targets == {str(project_root / "AGENTS.generated.md")}
+    assert rule_targets == {str(project_root / ".ai-sync" / "rules" / "company-commit.md")}
 
-    link_targets = {action.target for action in context.plan.actions if action.kind == "rule-link"}
-    assert link_targets == {str(project_root / "AGENTS.md")}
+    index_targets = {action.target for action in context.plan.actions if action.kind == "rule-index"}
+    assert index_targets == {str(project_root / "AGENTS.md")}
 
 
 def test_build_plan_context_hides_unchanged_managed_outputs(tmp_path: Path) -> None:
@@ -99,15 +112,7 @@ def test_build_plan_context_hides_unchanged_managed_outputs(tmp_path: Path) -> N
     display = PlainDisplay()
     context = build_plan_context(project_root, config_root, display)
 
-    assert run_apply(
-        project_root=project_root,
-        source_roots={alias: source.root for alias, source in context.resolved_sources.items()},
-        manifest=context.manifest,
-        mcp_manifest=context.mcp_manifest,
-        secrets=context.secrets,
-        runtime_env=context.runtime_env,
-        display=display,
-    ) == 0
+    assert _run_apply_from_context(context, project_root, display) == 0
 
     current = build_plan_context(project_root, config_root, display)
     assert current.plan.actions == []
@@ -118,22 +123,16 @@ def test_build_plan_context_only_shows_changed_rule_outputs(tmp_path: Path) -> N
     display = PlainDisplay()
     context = build_plan_context(project_root, config_root, display)
 
-    assert run_apply(
-        project_root=project_root,
-        source_roots={alias: source.root for alias, source in context.resolved_sources.items()},
-        manifest=context.manifest,
-        mcp_manifest=context.mcp_manifest,
-        secrets=context.secrets,
-        runtime_env=context.runtime_env,
-        display=display,
-    ) == 0
+    assert _run_apply_from_context(context, project_root, display) == 0
 
     rule_path = tmp_path / "company-source" / "rules" / "commit.md"
     rule_path.write_text("Updated commit rules\n", encoding="utf-8")
 
     current = build_plan_context(project_root, config_root, display)
     assert {action.kind for action in current.plan.actions} == {"rule"}
-    assert {action.target for action in current.plan.actions} == {str(project_root / "AGENTS.generated.md")}
+    assert {action.target for action in current.plan.actions} == {
+        str(project_root / ".ai-sync" / "rules" / "company-commit.md")
+    }
 
 
 def test_build_plan_context_and_apply_show_and_execute_delete_for_removed_command(tmp_path: Path) -> None:
@@ -141,17 +140,9 @@ def test_build_plan_context_and_apply_show_and_execute_delete_for_removed_comman
     display = PlainDisplay()
     context = build_plan_context(project_root, config_root, display)
 
-    assert run_apply(
-        project_root=project_root,
-        source_roots={alias: source.root for alias, source in context.resolved_sources.items()},
-        manifest=context.manifest,
-        mcp_manifest=context.mcp_manifest,
-        secrets=context.secrets,
-        runtime_env=context.runtime_env,
-        display=display,
-    ) == 0
+    assert _run_apply_from_context(context, project_root, display) == 0
 
-    codex_command = project_root / ".codex" / "commands" / "session-summary.md"
+    codex_command = project_root / ".codex" / "commands" / "company-session-summary.md"
     assert codex_command.exists()
 
     manifest_path = project_root / ".ai-sync.yaml"
@@ -179,15 +170,7 @@ def test_build_plan_context_and_apply_show_and_execute_delete_for_removed_comman
     delete_actions = [action for action in current.plan.actions if action.action == "delete"]
     assert any(action.kind == "command" for action in delete_actions)
 
-    assert run_apply(
-        project_root=project_root,
-        source_roots={alias: source.root for alias, source in current.resolved_sources.items()},
-        manifest=current.manifest,
-        mcp_manifest=current.mcp_manifest,
-        secrets=current.secrets,
-        runtime_env=current.runtime_env,
-        display=display,
-    ) == 0
+    assert _run_apply_from_context(current, project_root, display) == 0
 
     assert not codex_command.exists()
 
@@ -222,7 +205,7 @@ def test_saved_plan_invalidates_when_manifest_changes(tmp_path: Path) -> None:
         validate_saved_plan(plan_path, current.plan)
 
 
-def test_build_plan_context_rejects_colliding_commands(tmp_path: Path) -> None:
+def test_build_plan_no_collision_with_alias_prefixed_commands(tmp_path: Path) -> None:
     config_root = tmp_path / "config"
     config_root.mkdir()
     (config_root / "config.toml").write_text('op_account_identifier = "x.1password.com"\n', encoding="utf-8")
@@ -254,5 +237,7 @@ def test_build_plan_context_rejects_colliding_commands(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(RuntimeError, match="Planning collision"):
-        build_plan_context(project_root, config_root, PlainDisplay())
+    display = PlainDisplay()
+    context = build_plan_context(project_root, config_root, display)
+    command_actions = [a for a in context.plan.actions if a.kind == "command"]
+    assert len(command_actions) >= 2
