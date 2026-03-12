@@ -72,12 +72,18 @@ def run_apply(
     stale_delete_specs = _build_stale_delete_specs(store, desired_targets)
     if stale_delete_specs:
         track_write_blocks(stale_delete_specs, store)
+        dirs_to_clean: set[Path] = set()
         for spec in stale_delete_specs:
             file_path = spec.file_path
             if str(file_path) in {fp for fp, _, _ in desired_targets}:
                 continue
             if file_path.is_file() and not file_path.read_text(encoding="utf-8").strip():
                 file_path.unlink(missing_ok=True)
+                dirs_to_clean.add(file_path.parent)
+            store.remove_entry(file_path, spec.format, spec.target)
+        for d in sorted(dirs_to_clean, key=lambda p: len(p.parts), reverse=True):
+            if d.is_dir() and not any(d.iterdir()):
+                d.rmdir()
 
     for path in secret_file_paths:
         if path.exists():

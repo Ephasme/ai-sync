@@ -164,6 +164,17 @@ class StateStore:
         except OSError:
             return None
 
+    def remove_entry(self, file_path: Path, format: str, target: str) -> None:
+        key = self._make_key(str(file_path), format, target)
+        if not key:
+            return
+        self._index.pop(key, None)
+        entries = self._data.get("entries", [])
+        self._data["entries"] = [
+            e for e in entries
+            if self._make_key(e.get("file_path"), e.get("format"), e.get("target")) != key
+        ]
+
     def delete_state(self) -> None:
         if not self._state_root.exists():
             return
