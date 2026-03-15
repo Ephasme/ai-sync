@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Literal, Protocol
 
 RuleStyle = Literal["section", "error", "success", "info"]
-PrintStyle = Literal["normal", "dim", "warning", "success", "info"]
+PrintStyle = Literal["normal", "dim", "warning", "success", "info", "danger"]
 PanelStyle = Literal["normal", "error", "success", "info"]
 
 

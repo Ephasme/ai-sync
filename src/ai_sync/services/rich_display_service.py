@@ -22,6 +22,7 @@ class RichDisplayService(DisplayService):
         "warning": "yellow",
         "success": "bold green",
         "info": "cyan",
+        "danger": "bold red",
     }
     _PANEL_STYLES: dict[PanelStyle, str] = {
         "normal": "",

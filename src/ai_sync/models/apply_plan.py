@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from ai_sync.models.plan_action import PlanAction
 from ai_sync.models.plan_source import PlanSource
 
-PLAN_SCHEMA_VERSION = 1
+PLAN_SCHEMA_VERSION = 3
 
 
 class ApplyPlan(BaseModel):

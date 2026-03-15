@@ -10,6 +10,7 @@ from ai_sync.models.oauth_override_config import OAuthOverrideConfig
 class ClientOverrideConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    name: str | None = None
     method: Literal["stdio", "http", "sse"] | None = None
     command: str | None = None
     args: list[str] | None = None

@@ -35,12 +35,14 @@ def _write_project(tmp_path: Path) -> tuple[Path, Path]:
     (source_root / "skills" / "code-review" / "prompt.md").write_text("# Skill\n", encoding="utf-8")
     (source_root / "commands" / "session-summary").mkdir(parents=True)
     (source_root / "commands" / "session-summary" / "artifact.yaml").write_text(
+        "name: Session summary\n"
         "description: Session summary command\n",
         encoding="utf-8",
     )
     (source_root / "commands" / "session-summary" / "prompt.md").write_text("Summarize\n", encoding="utf-8")
     (source_root / "rules" / "commit").mkdir(parents=True)
     (source_root / "rules" / "commit" / "artifact.yaml").write_text(
+        "name: Commit conventions\n"
         "description: Commit conventions\n"
         "alwaysApply: true\n",
         encoding="utf-8",
@@ -49,7 +51,7 @@ def _write_project(tmp_path: Path) -> tuple[Path, Path]:
     (source_root / "env.yaml").write_text("TOKEN:\n  value: abc\n", encoding="utf-8")
     (source_root / "mcp-servers" / "context7").mkdir(parents=True)
     (source_root / "mcp-servers" / "context7" / "artifact.yaml").write_text(
-        'method: stdio\ncommand: npx\nenv:\n  TOKEN: "$TOKEN"\n',
+        'name: Context7\ndescription: Library documentation lookup via Context7.\nmethod: stdio\ncommand: npx\nenv:\n  TOKEN: "$TOKEN"\n',
         encoding="utf-8",
     )
 
@@ -106,6 +108,22 @@ def test_build_plan_context_marks_secret_backed_outputs(tmp_path: Path) -> None:
     assert str(project_root / ".env.ai-sync") in secret_targets
 
 
+def test_build_plan_context_includes_artifact_names_and_descriptions(tmp_path: Path) -> None:
+    config_root, project_root = _write_project(tmp_path)
+    display = PlainDisplayService()
+    context = _build_plan_context(project_root, config_root, display)
+
+    actions_by_kind = {action.kind: action for action in context.plan.actions}
+    assert actions_by_kind["command"].name == "Session summary"
+    assert actions_by_kind["command"].description == "Session summary command"
+    assert actions_by_kind["rule"].name == "Commit conventions"
+    assert actions_by_kind["mcp-server"].name == "Context7"
+    assert (
+        actions_by_kind["mcp-server"].description
+        == "Library documentation lookup via Context7."
+    )
+
+
 def test_build_plan_context_prefers_local_manifest(tmp_path: Path) -> None:
     config_root, project_root = _write_project(tmp_path)
     local_manifest_path = project_root / ".ai-sync.local.yaml"
@@ -156,6 +174,7 @@ def test_build_plan_context_only_shows_changed_rule_outputs(tmp_path: Path) -> N
 
     rule_path = tmp_path / "company-source" / "rules" / "commit" / "artifact.yaml"
     rule_path.write_text(
+        "name: Commit conventions\n"
         "description: Commit conventions\n"
         "alwaysApply: true\n",
         encoding="utf-8",
@@ -329,6 +348,7 @@ def test_build_plan_no_collision_with_alias_prefixed_commands(tmp_path: Path) ->
     company = tmp_path / "company"
     (company / "commands" / "shared").mkdir(parents=True)
     (company / "commands" / "shared" / "artifact.yaml").write_text(
+        "name: Shared\n"
         "description: Company shared command\n",
         encoding="utf-8",
     )
@@ -336,6 +356,7 @@ def test_build_plan_no_collision_with_alias_prefixed_commands(tmp_path: Path) ->
     frontend = tmp_path / "frontend"
     (frontend / "commands" / "shared").mkdir(parents=True)
     (frontend / "commands" / "shared" / "artifact.yaml").write_text(
+        "name: Shared\n"
         "description: Frontend shared command\n",
         encoding="utf-8",
     )

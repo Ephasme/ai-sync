@@ -57,7 +57,10 @@ def test_load_manifest_valid(tmp_path: Path) -> None:
     server_dir = tmp_path / "mcp-servers" / "ok"
     server_dir.mkdir(parents=True)
     (server_dir / "artifact.yaml").write_text(
-        "method: stdio\ncommand: npx\n",
+        "name: OK\n"
+        "description: OK MCP server.\n"
+        "method: stdio\n"
+        "command: npx\n",
         encoding="utf-8",
     )
     data = McpServerService().load_manifest(tmp_path, display)
@@ -69,9 +72,21 @@ def test_load_and_filter_mcp_by_scoped_refs(tmp_path: Path) -> None:
     display = FakeDisplay()
     company = tmp_path / "company"
     (company / "mcp-servers" / "srv-a").mkdir(parents=True)
-    (company / "mcp-servers" / "srv-a" / "artifact.yaml").write_text("method: stdio\ncommand: npx\n", encoding="utf-8")
+    (company / "mcp-servers" / "srv-a" / "artifact.yaml").write_text(
+        "name: Server A\n"
+        "description: Server A MCP.\n"
+        "method: stdio\n"
+        "command: npx\n",
+        encoding="utf-8",
+    )
     (company / "mcp-servers" / "srv-b").mkdir(parents=True)
-    (company / "mcp-servers" / "srv-b" / "artifact.yaml").write_text("method: stdio\ncommand: npx\n", encoding="utf-8")
+    (company / "mcp-servers" / "srv-b" / "artifact.yaml").write_text(
+        "name: Server B\n"
+        "description: Server B MCP.\n"
+        "method: stdio\n"
+        "command: npx\n",
+        encoding="utf-8",
+    )
     result = McpServerService().load_and_filter_mcp(
         {"company": _source("company", company)},
         ["company/srv-a"],
@@ -85,7 +100,13 @@ def test_load_and_filter_mcp_rejects_missing_server(tmp_path: Path) -> None:
     display = FakeDisplay()
     company = tmp_path / "company"
     (company / "mcp-servers" / "srv-a").mkdir(parents=True)
-    (company / "mcp-servers" / "srv-a" / "artifact.yaml").write_text("method: stdio\ncommand: npx\n", encoding="utf-8")
+    (company / "mcp-servers" / "srv-a" / "artifact.yaml").write_text(
+        "name: Server A\n"
+        "description: Server A MCP.\n"
+        "method: stdio\n"
+        "command: npx\n",
+        encoding="utf-8",
+    )
     with pytest.raises(RuntimeError, match="was not found"):
         McpServerService().load_and_filter_mcp({"company": _source("company", company)}, ["company/srv-b"], display)
 
@@ -95,13 +116,19 @@ def test_load_and_filter_mcp_rejects_colliding_output_ids(tmp_path: Path) -> Non
     company = tmp_path / "company"
     (company / "mcp-servers" / "fetch").mkdir(parents=True)
     (company / "mcp-servers" / "fetch" / "artifact.yaml").write_text(
-        "method: stdio\ncommand: company\n",
+        "name: Fetch Company\n"
+        "description: Company MCP fetch server.\n"
+        "method: stdio\n"
+        "command: company\n",
         encoding="utf-8",
     )
     frontend = tmp_path / "frontend"
     (frontend / "mcp-servers" / "fetch").mkdir(parents=True)
     (frontend / "mcp-servers" / "fetch" / "artifact.yaml").write_text(
-        "method: stdio\ncommand: frontend\n",
+        "name: Fetch Frontend\n"
+        "description: Frontend MCP fetch server.\n"
+        "method: stdio\n"
+        "command: frontend\n",
         encoding="utf-8",
     )
     with pytest.raises(RuntimeError, match="collision"):

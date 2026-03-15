@@ -10,12 +10,10 @@ from ai_sync.data_classes.runtime_env import RuntimeEnv
 from ai_sync.data_classes.write_spec import WriteSpec
 from ai_sync.di import create_container
 from ai_sync.models import ProjectManifest, SourceConfig
-from ai_sync.services.artifact_service import (
-    ArtifactService,
-    _agent_artifacts,
-    _command_artifacts,
-    _skill_artifacts,
-)
+from ai_sync.services.agent_artifact_service import AgentArtifactService
+from ai_sync.services.artifact_bundle_service import ArtifactBundleService
+from ai_sync.services.command_artifact_service import CommandArtifactService
+from ai_sync.services.skill_artifact_service import SkillArtifactService
 
 
 class FakeDisplay:
@@ -117,11 +115,13 @@ def _make_repo_root(tmp_path: Path) -> Path:
     (root / "skills" / "skill-one" / "prompt.md").write_text("# Skill\n", encoding="utf-8")
     (root / "skills" / "skill-one" / "files" / "reference.md").write_text("ref\n", encoding="utf-8")
     (root / "commands" / "shortcut" / "artifact.yaml").write_text(
+        "name: Shortcut\n"
         "description: A shortcut command\n",
         encoding="utf-8",
     )
     (root / "commands" / "shortcut" / "prompt.md").write_text("Do a thing\n", encoding="utf-8")
     (root / "rules" / "commit" / "artifact.yaml").write_text(
+        "name: Commit conventions\n"
         "description: Commit conventions\n"
         "alwaysApply: true\n",
         encoding="utf-8",
@@ -129,7 +129,7 @@ def _make_repo_root(tmp_path: Path) -> Path:
     (root / "rules" / "commit" / "prompt.md").write_text("Commit rules\n", encoding="utf-8")
     (root / "mcp-servers" / "srv").mkdir(parents=True)
     (root / "mcp-servers" / "srv" / "artifact.yaml").write_text(
-        'method: stdio\ncommand: npx\nenv:\n  TOKEN: "$TOKEN"\n',
+        'name: Example MCP\ndescription: Example MCP server for test coverage.\nmethod: stdio\ncommand: npx\nenv:\n  TOKEN: "$TOKEN"\n',
         encoding="utf-8",
     )
     return root
@@ -154,7 +154,7 @@ def _resolve_artifacts(
     mcp_manifest: dict,
     clients,
 ):
-    artifacts = ArtifactService().collect_artifacts(
+    artifacts = create_container().artifact_service().collect_artifacts(
         project_root=project_root,
         manifest=manifest,
         resolved_sources=resolved_sources,
@@ -327,8 +327,19 @@ def test_skill_artifacts_include_all_files(tmp_path: Path) -> None:
         skills=["company/skill-one"],
     )
 
-    artifacts = _skill_artifacts(manifest, resolved_sources, [client])
+    artifacts = SkillArtifactService(
+        artifact_bundle_service=ArtifactBundleService()
+    ).collect_artifacts(
+        project_root=project_root,
+        manifest=manifest,
+        resolved_sources=resolved_sources,
+        runtime_env=RuntimeEnv(),
+        mcp_manifest={},
+        clients=[client],
+    )
     assert len(artifacts) == 1
+    assert artifacts[0].name == "skill-one"
+    assert artifacts[0].description == "Example skill"
 
     specs = artifacts[0].resolve()
     rel_paths = {
@@ -355,6 +366,7 @@ def test_command_artifacts_produce_write_specs(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     (repo_root / "commands" / "review" / "shortcut").mkdir(parents=True)
     (repo_root / "commands" / "review" / "shortcut" / "artifact.yaml").write_text(
+        "name: Shortcut\n"
         "description: A shortcut command\n",
         encoding="utf-8",
     )
@@ -370,9 +382,20 @@ def test_command_artifacts_produce_write_specs(tmp_path: Path) -> None:
         commands=["company/review/shortcut"],
     )
 
-    artifacts = _command_artifacts(manifest, resolved_sources, [client])
+    artifacts = CommandArtifactService(
+        artifact_bundle_service=ArtifactBundleService()
+    ).collect_artifacts(
+        project_root=project_root,
+        manifest=manifest,
+        resolved_sources=resolved_sources,
+        runtime_env=RuntimeEnv(),
+        mcp_manifest={},
+        clients=[client],
+    )
     assert len(artifacts) == 1
     assert artifacts[0].kind == "command"
+    assert artifacts[0].name == "Shortcut"
+    assert artifacts[0].description == "A shortcut command"
 
     specs = artifacts[0].resolve()
     assert len(specs) == 1
@@ -401,8 +424,19 @@ def test_agent_artifacts_use_scoped_alias(tmp_path: Path) -> None:
         agents=["company/agent"],
     )
 
-    artifacts = _agent_artifacts(manifest, resolved_sources, [client])
+    artifacts = AgentArtifactService(
+        artifact_bundle_service=ArtifactBundleService()
+    ).collect_artifacts(
+        project_root=project_root,
+        manifest=manifest,
+        resolved_sources=resolved_sources,
+        runtime_env=RuntimeEnv(),
+        mcp_manifest={},
+        clients=[client],
+    )
     assert len(artifacts) == 1
+    assert artifacts[0].name == "Agent"
+    assert artifacts[0].description == "Agent from repo A"
 
     specs = artifacts[0].resolve()
     assert specs[0].value == "## From A\n"

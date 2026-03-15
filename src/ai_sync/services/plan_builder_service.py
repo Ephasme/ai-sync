@@ -20,6 +20,8 @@ if TYPE_CHECKING:
     from ai_sync.data_classes.write_spec import WriteSpec
     from ai_sync.models import ProjectManifest
 
+_CLIENT_DIR_PREFIXES = (".cursor/", ".claude/", ".codex/", ".gemini/")
+
 
 class PlanBuilderService:
     """Compute plan actions from current filesystem state and desired artifacts."""
@@ -117,8 +119,11 @@ class PlanBuilderService:
                     source_alias=art.source_alias,
                     kind=art.kind,
                     resource=art.resource,
+                    name=art.name,
+                    description=art.description,
                     target=str(target_path),
                     target_key=plan_key,
+                    client=art.client,
                     secret_backed=art.secret_backed,
                 )
             )
@@ -127,7 +132,8 @@ class PlanBuilderService:
             self._managed_output_service.list_stale_entries(
                 project_root=project_root,
                 desired_targets=resolved_set.desired_targets,
-            )
+            ),
+            project_root,
         )
         actions.extend(stale_actions)
 
@@ -160,6 +166,7 @@ class PlanBuilderService:
     def _build_stale_plan_actions(
         self,
         stale_entries: list[dict],
+        project_root: Path,
     ) -> list[PlanAction]:
         stale_actions: list[PlanAction] = []
         for entry in stale_entries:
@@ -170,6 +177,8 @@ class PlanBuilderService:
 
             kind = entry.get("kind", "unknown")
             resource = entry.get("resource", target)
+            name = entry.get("name", resource)
+            description = entry.get("description", "")
             source_alias = entry.get("source_alias", "state")
 
             stale_actions.append(
@@ -178,8 +187,11 @@ class PlanBuilderService:
                     source_alias=source_alias,
                     kind=kind,
                     resource=resource,
+                    name=name if isinstance(name, str) else str(resource),
+                    description=description if isinstance(description, str) else "",
                     target=file_path,
                     target_key=file_path,
+                    client=_infer_client_from_path(file_path, str(project_root)),
                 )
             )
         return stale_actions
@@ -195,8 +207,21 @@ class PlanBuilderService:
                         source_alias="project",
                         kind="git-safety",
                         resource="pre-commit hook",
+                        name="pre-commit hook",
+                        description="Git safety hook required for local secret handling.",
                         target=".git/hooks/pre-commit",
                         target_key="git-safety:pre-commit-hook",
+                        client="global",
                     )
                 )
         return actions
+
+
+def _infer_client_from_path(abs_path: str, project_root: str) -> str:
+    """Derive the target client from a tracked file path for stale entries."""
+    root = project_root.rstrip("/\\")
+    rel = abs_path[len(root) + 1 :] if abs_path.startswith(root + "/") else abs_path
+    for prefix in _CLIENT_DIR_PREFIXES:
+        if rel.startswith(prefix):
+            return prefix.strip("./")
+    return "global"

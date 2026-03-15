@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 from dependency_injector import providers
+from fastapi import FastAPI
 
 from ai_sync import cli
 from ai_sync.di import create_container
@@ -46,12 +49,14 @@ def _write_project(tmp_path: Path, *, with_gitignore: bool = True) -> tuple[Path
     (source_root / "skills" / "code-review" / "prompt.md").write_text("# Skill\n", encoding="utf-8")
     (source_root / "commands" / "session-summary").mkdir(parents=True)
     (source_root / "commands" / "session-summary" / "artifact.yaml").write_text(
+        "name: Session summary\n"
         "description: Session summary command\n",
         encoding="utf-8",
     )
     (source_root / "commands" / "session-summary" / "prompt.md").write_text("Summarize\n", encoding="utf-8")
     (source_root / "rules" / "commit").mkdir(parents=True)
     (source_root / "rules" / "commit" / "artifact.yaml").write_text(
+        "name: Commit conventions\n"
         "description: Commit conventions\n"
         "alwaysApply: true\n",
         encoding="utf-8",
@@ -59,7 +64,10 @@ def _write_project(tmp_path: Path, *, with_gitignore: bool = True) -> tuple[Path
     (source_root / "rules" / "commit" / "prompt.md").write_text("Commit rules\n", encoding="utf-8")
     (source_root / "mcp-servers" / "context7").mkdir(parents=True)
     (source_root / "mcp-servers" / "context7" / "artifact.yaml").write_text(
-        "method: stdio\ncommand: npx\n",
+        "name: Context7\n"
+        "description: Library documentation lookup via Context7.\n"
+        "method: stdio\n"
+        "command: npx\n",
         encoding="utf-8",
     )
 
@@ -140,10 +148,19 @@ def test_run_install_requires_op_account_identifier(
     )
 
 
-def test_build_parser_has_plan_and_apply() -> None:
+def test_build_parser_has_plan_apply_and_ui() -> None:
     parser = cli._build_parser()
     assert parser.parse_args(["plan"]).command == "plan"
     assert parser.parse_args(["apply"]).command == "apply"
+    assert parser.parse_args(["ui"]).command == "ui"
+
+
+def test_build_parser_accepts_ui_host_and_port() -> None:
+    parser = cli._build_parser()
+    args = parser.parse_args(["ui", "--host", "0.0.0.0", "--port", "9999"])
+    assert args.command == "ui"
+    assert args.host == "0.0.0.0"
+    assert args.port == 9999
 
 
 def test_build_parser_accepts_op_account_identifier_flag() -> None:
@@ -230,7 +247,7 @@ def test_run_apply_prints_plan_and_not_legacy_sync_sections(
     assert container.apply_service().run(config_root=config_root, display=display, planfile=None) == 0
 
     out = capsys.readouterr().out
-    assert "Planned Actions" in out
+    assert "Planned Changes" in out
     assert "Syncing Agents" not in out
     assert "Syncing Skills" not in out
 
@@ -289,6 +306,82 @@ def test_run_uninstall_without_project_mentions_both_manifest_names(
 
     out = capsys.readouterr().out
     assert "No .ai-sync.local.yaml or .ai-sync.yaml found. Nothing to uninstall." in out
+
+
+def test_run_ui_starts_server_and_opens_browser(tmp_path: Path) -> None:
+    config_root, project_root = _write_project(tmp_path)
+    container = create_container()
+    container.override_providers(
+        project_locator_service=providers.Object(_FixedProjectLocatorService(project_root))
+    )
+    runtime = SimpleNamespace(container=container)
+    browser_urls: list[str] = []
+    server_calls: list[tuple[FastAPI, str, int]] = []
+
+    def open_browser(url: str) -> bool:
+        browser_urls.append(url)
+        return True
+
+    def run_server(app: FastAPI, *, host: str, port: int) -> None:
+        server_calls.append((app, host, port))
+
+    assert (
+        cli._run_ui(
+            runtime=runtime,
+            config_root=config_root,
+            host="0.0.0.0",
+            port=9999,
+            open_browser=open_browser,
+            run_server=run_server,
+        )
+        == 0
+    )
+    assert browser_urls == ["http://127.0.0.1:9999"]
+    assert len(server_calls) == 1
+    app, host, port = server_calls[0]
+    assert host == "0.0.0.0"
+    assert port == 9999
+    assert app.state.project_root == project_root
+
+
+def test_run_ui_starts_server_without_project_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_root, _project_root = _write_project(tmp_path)
+    container = create_container()
+    container.override_providers(
+        project_locator_service=providers.Object(_FixedProjectLocatorService(None))
+    )
+    runtime = SimpleNamespace(container=container)
+    workspace_root = tmp_path / "scratch"
+    workspace_root.mkdir()
+    monkeypatch.chdir(workspace_root)
+    browser_urls: list[str] = []
+    server_calls: list[tuple[FastAPI, str, int]] = []
+
+    def open_browser(url: str) -> bool:
+        browser_urls.append(url)
+        return True
+
+    def run_server(app: FastAPI, *, host: str, port: int) -> None:
+        server_calls.append((app, host, port))
+
+    assert (
+        cli._run_ui(
+            runtime=runtime,
+            config_root=config_root,
+            host="127.0.0.1",
+            port=8321,
+            open_browser=open_browser,
+            run_server=run_server,
+        )
+        == 0
+    )
+    assert browser_urls == ["http://127.0.0.1:8321"]
+    assert len(server_calls) == 1
+    app, host, port = server_calls[0]
+    assert host == "127.0.0.1"
+    assert port == 8321
+    assert app.state.project_root is None
+    assert app.state.workspace_root == workspace_root.resolve()
 
 
 def _make_plan_with_deletion() -> ApplyPlan:

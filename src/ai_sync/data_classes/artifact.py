@@ -14,9 +14,12 @@ if TYPE_CHECKING:
 class Artifact:
     kind: str
     resource: str
+    name: str
+    description: str
     source_alias: str
     plan_key: str
     secret_backed: bool
+    client: str
     resolve_fn: Callable[[], list["WriteSpec"]]
 
     def resolve(self) -> list["WriteSpec"]:

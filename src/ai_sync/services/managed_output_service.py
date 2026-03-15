@@ -54,6 +54,8 @@ class ManagedOutputService:
             if entry is not None:
                 entry["kind"] = artifact.kind
                 entry["resource"] = artifact.resource
+                entry["name"] = artifact.name
+                entry["description"] = artifact.description
                 entry["source_alias"] = artifact.source_alias
 
         stale_delete_specs = self.build_stale_delete_specs(store, desired_targets)

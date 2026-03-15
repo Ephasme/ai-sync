@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from ai_sync.services.artifact_service import _load_artifact_yaml
+from ai_sync.services.artifact_bundle_service import ArtifactBundleService
+
+BUNDLE_SERVICE = ArtifactBundleService()
 
 
 def test_load_artifact_yaml_reads_sibling_prompt_file(tmp_path: Path) -> None:
@@ -18,19 +20,19 @@ def test_load_artifact_yaml_reads_sibling_prompt_file(tmp_path: Path) -> None:
     )
     (bundle_dir / "prompt.md").write_text("## Task\nHelp\n", encoding="utf-8")
 
-    meta, prompt = _load_artifact_yaml(
+    bundle = BUNDLE_SERVICE.load_artifact_yaml(
         artifact_path,
         defaults={"name": "engineer"},
         metadata_keys={"slug", "name", "description"},
         required_keys={"description"},
     )
 
-    assert meta == {
+    assert bundle.metadata == {
         "name": "engineer",
         "slug": "engineer",
         "description": "Senior software engineer assistant",
     }
-    assert prompt == "## Task\nHelp\n"
+    assert bundle.prompt == "## Task\nHelp\n"
 
 
 def test_load_artifact_yaml_rejects_inline_prompt_field(tmp_path: Path) -> None:
@@ -45,7 +47,7 @@ def test_load_artifact_yaml_rejects_inline_prompt_field(tmp_path: Path) -> None:
     )
 
     with pytest.raises(RuntimeError, match="must not define an inline 'prompt' field"):
-        _load_artifact_yaml(
+        BUNDLE_SERVICE.load_artifact_yaml(
             artifact_path,
             defaults={},
             metadata_keys={"description"},
@@ -53,7 +55,7 @@ def test_load_artifact_yaml_rejects_inline_prompt_field(tmp_path: Path) -> None:
         )
 
 
-def test_load_artifact_yaml_requires_prompt_file(tmp_path: Path) -> None:
+def test_load_artifact_yaml_returns_none_when_prompt_file_is_missing(tmp_path: Path) -> None:
     bundle_dir = tmp_path / "rules" / "commit"
     bundle_dir.mkdir(parents=True)
     artifact_path = bundle_dir / "artifact.yaml"
@@ -63,10 +65,54 @@ def test_load_artifact_yaml_requires_prompt_file(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
+    bundle = BUNDLE_SERVICE.load_artifact_yaml(
+        artifact_path,
+        defaults={"alwaysApply": True},
+        metadata_keys={"description", "alwaysApply", "globs"},
+        required_keys={"description"},
+    )
+
+    assert bundle.metadata == {
+        "alwaysApply": True,
+        "description": "Commit conventions",
+    }
+    assert bundle.prompt is None
+
+
+def test_require_prompt_raises_when_prompt_file_is_missing(tmp_path: Path) -> None:
+    bundle_dir = tmp_path / "rules" / "commit"
+    bundle_dir.mkdir(parents=True)
+    artifact_path = bundle_dir / "artifact.yaml"
+    artifact_path.write_text(
+        "description: Commit conventions\n"
+        "alwaysApply: true\n",
+        encoding="utf-8",
+    )
+
+    bundle = BUNDLE_SERVICE.load_artifact_yaml(
+        artifact_path,
+        defaults={"alwaysApply": True},
+        metadata_keys={"description", "alwaysApply", "globs"},
+        required_keys={"description"},
+    )
+
     with pytest.raises(RuntimeError, match="must include prompt.md"):
-        _load_artifact_yaml(
+        BUNDLE_SERVICE.require_prompt(bundle, artifact_path)
+
+
+def test_load_artifact_yaml_raises_when_required_name_is_missing(tmp_path: Path) -> None:
+    bundle_dir = tmp_path / "commands" / "session-summary"
+    bundle_dir.mkdir(parents=True)
+    artifact_path = bundle_dir / "artifact.yaml"
+    artifact_path.write_text(
+        "description: Session summary command\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="must include: name"):
+        BUNDLE_SERVICE.load_artifact_yaml(
             artifact_path,
-            defaults={"alwaysApply": True},
-            metadata_keys={"description", "alwaysApply", "globs"},
-            required_keys={"description"},
+            defaults={},
+            metadata_keys={"name", "description"},
+            required_keys={"name", "description"},
         )

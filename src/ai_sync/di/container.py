@@ -12,8 +12,11 @@ from dependency_injector import containers, providers
 from ai_sync.adapters.filesystem import FileSystem
 from ai_sync.adapters.process_runner import ProcessRunner
 from ai_sync.clients import ClientFactory
+from ai_sync.services.agent_artifact_service import AgentArtifactService
 from ai_sync.services.apply_service import ApplyService
+from ai_sync.services.artifact_bundle_service import ArtifactBundleService
 from ai_sync.services.artifact_service import ArtifactService
+from ai_sync.services.command_artifact_service import CommandArtifactService
 from ai_sync.services.config_store_service import ConfigStoreService
 from ai_sync.services.doctor_service import DoctorService
 from ai_sync.services.environment_service import EnvironmentService
@@ -22,6 +25,7 @@ from ai_sync.services.git_safety_service import GitSafetyService
 from ai_sync.services.git_source_fetcher_service import GitSourceFetcherService
 from ai_sync.services.install_service import InstallService
 from ai_sync.services.managed_output_service import ManagedOutputService
+from ai_sync.services.mcp_artifact_service import McpArtifactService
 from ai_sync.services.mcp_server_service import McpServerService
 from ai_sync.services.one_password_auth_service import OnePasswordAuthService
 from ai_sync.services.one_password_cli_service import OnePasswordCliService
@@ -30,8 +34,12 @@ from ai_sync.services.one_password_secret_service import OnePasswordSecretServic
 from ai_sync.services.plan_builder_service import PlanBuilderService
 from ai_sync.services.plan_persistence_service import PlanPersistenceService
 from ai_sync.services.plan_service import PlanService
+from ai_sync.services.project_artifact_service import ProjectArtifactService
 from ai_sync.services.project_locator_service import ProjectLocatorService
 from ai_sync.services.project_manifest_service import ProjectManifestService
+from ai_sync.services.rule_artifact_service import RuleArtifactService
+from ai_sync.services.skill_artifact_service import SkillArtifactService
+from ai_sync.services.source_catalog_service import SourceCatalogService
 from ai_sync.services.source_fingerprint_service import SourceFingerprintService
 from ai_sync.services.source_resolver_service import SourceResolverService
 from ai_sync.services.tool_requirement_service import ToolRequirementService
@@ -51,7 +59,34 @@ class AppContainer(containers.DeclarativeContainer):
     process_runner = providers.Singleton(ProcessRunner)
     filesystem = providers.Singleton(FileSystem)
     client_factory = providers.Singleton(ClientFactory)
-    artifact_service = providers.Singleton(ArtifactService)
+    artifact_bundle_service = providers.Singleton(ArtifactBundleService)
+    agent_artifact_service = providers.Singleton(
+        AgentArtifactService,
+        artifact_bundle_service=artifact_bundle_service,
+    )
+    command_artifact_service = providers.Singleton(
+        CommandArtifactService,
+        artifact_bundle_service=artifact_bundle_service,
+    )
+    skill_artifact_service = providers.Singleton(
+        SkillArtifactService,
+        artifact_bundle_service=artifact_bundle_service,
+    )
+    rule_artifact_service = providers.Singleton(
+        RuleArtifactService,
+        artifact_bundle_service=artifact_bundle_service,
+    )
+    mcp_artifact_service = providers.Singleton(McpArtifactService)
+    project_artifact_service = providers.Singleton(ProjectArtifactService)
+    artifact_service = providers.Singleton(
+        ArtifactService,
+        agent_artifact_service=agent_artifact_service,
+        command_artifact_service=command_artifact_service,
+        skill_artifact_service=skill_artifact_service,
+        rule_artifact_service=rule_artifact_service,
+        mcp_artifact_service=mcp_artifact_service,
+        project_artifact_service=project_artifact_service,
+    )
 
     config_store_service = providers.Singleton(
         ConfigStoreService,
@@ -90,6 +125,10 @@ class AppContainer(containers.DeclarativeContainer):
         SourceResolverService,
         git_fetcher=git_source_fetcher_service,
         fingerprinter=source_fingerprint_service,
+    )
+    source_catalog_service = providers.Singleton(
+        SourceCatalogService,
+        artifact_bundle_service=artifact_bundle_service,
     )
 
     one_password_auth_service = providers.Singleton(

@@ -36,6 +36,7 @@ knowledge-base/eval-logs.jsonl
 
 # Node (for skills with .mjs scripts)
 node_modules/
+ui/dist/
 
 # IDE & OS
 .idea/
@@ -44,6 +45,7 @@ node_modules/
 
 # Transient documentation
 docs/
+src/ai_sync/web/static/
 
 # BEGIN ai-sync:gitignore
 .cursor/*

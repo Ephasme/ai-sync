@@ -22,7 +22,11 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 packages = [{ include = "ai_sync", from = "src" }]
-include = ["LICENSE", "src/ai_sync/.client-versions.json"]
+include = [
+    "LICENSE",
+    "src/ai_sync/.client-versions.json",
+    "src/ai_sync/web/static/**/*",
+]
 
 [tool.poetry.urls]
 Issues = "https://github.com/Ephasme/ai-sync/issues"
@@ -38,12 +42,15 @@ tomli-w = ">=1.0"
 rich = ">=13.0"
 pathspec = ">=0.12"
 dependency-injector = "^4.48.3"
+fastapi = "^0.135.1"
+uvicorn = {extras = ["standard"], version = "^0.41.0"}
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0"
 pyright = ">=1.1.390"
 ruff = ">=0.9.0"
 pre-commit = ">=4.0"
+httpx = "^0.28.1"
 
 [tool.poetry.scripts]
 ai-sync = "ai_sync.cli:main"

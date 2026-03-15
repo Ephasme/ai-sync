@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ai_sync.services.artifact_service import _resolve_servers_for_client
+from ai_sync.services.mcp_artifact_service import _resolve_servers_for_client
 
 
 def test_resolve_servers_for_client_applies_overrides() -> None:

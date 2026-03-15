@@ -9,11 +9,12 @@ from ai_sync.models.oauth_config import OAuthConfig
 
 
 class ServerConfig(BaseModel):
+    name: str
     method: Literal["stdio", "http", "sse"] = "stdio"
     command: str | None = None
     args: list[str] = Field(default_factory=list)
     url: str | None = None
-    description: str | None = None
+    description: str
     trust: bool | None = None
     timeout_seconds: StrictInt | StrictFloat | None = None
     env: dict[str, str] = Field(default_factory=dict)
@@ -36,6 +37,13 @@ class ServerConfig(BaseModel):
         method = info.data.get("method", "stdio")
         if method == "stdio" and (value is None or not str(value).strip()):
             raise ValueError("stdio servers must define command")
+        return value
+
+    @field_validator("name", "description")
+    @classmethod
+    def validate_required_text(cls, value: str, info):
+        if not value.strip():
+            raise ValueError(f"{info.field_name} must not be blank")
         return value
 
     @field_validator("timeout_seconds")

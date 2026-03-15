@@ -27,6 +27,26 @@ poetry sync --with dev
 
 Poetry is configured to create an in-project `.venv/`, which is what the `just` tasks use.
 
+### Web UI development
+
+For full hot reload during UI work, run the backend and frontend in separate terminals:
+
+```bash
+just ui-dev-api
+just ui-dev-web
+```
+
+This starts:
+
+- the FastAPI API with Python auto-reload on `http://127.0.0.1:8321`
+- the Vite frontend with HMR on `http://127.0.0.1:5173`
+
+If you want to keep using the packaged static UI instead of Vite HMR, use:
+
+```bash
+just build-ui-watch
+```
+
 Optional task runner:
 
 ```bash
@@ -59,7 +79,7 @@ Example:
 sources:
   company:
     source: github.com/acme/company-ai-sync
-    version: v1.2.0
+    version: v1.4.0
   frontend:
     source: ../frontend-ai-sync
 

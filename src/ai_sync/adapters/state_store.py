@@ -67,6 +67,8 @@ class StateStore:
         *,
         kind: str | None = None,
         resource: str | None = None,
+        name: str | None = None,
+        description: str | None = None,
         source_alias: str | None = None,
     ) -> dict:
         key = self._make_key(str(file_path), format, target)
@@ -78,6 +80,10 @@ class StateStore:
                 entry["kind"] = kind
             if resource is not None:
                 entry["resource"] = resource
+            if name is not None:
+                entry["name"] = name
+            if description is not None:
+                entry["description"] = description
             if source_alias is not None:
                 entry["source_alias"] = source_alias
             return entry
@@ -91,6 +97,10 @@ class StateStore:
             entry["kind"] = kind
         if resource is not None:
             entry["resource"] = resource
+        if name is not None:
+            entry["name"] = name
+        if description is not None:
+            entry["description"] = description
         if source_alias is not None:
             entry["source_alias"] = source_alias
         self._data["entries"].append(entry)
@@ -107,6 +117,8 @@ class StateStore:
         content: str | None,
         kind: str | None = None,
         resource: str | None = None,
+        name: str | None = None,
+        description: str | None = None,
         source_alias: str | None = None,
     ) -> None:
         entry = self.ensure_entry(
@@ -115,6 +127,8 @@ class StateStore:
             target,
             kind=kind,
             resource=resource,
+            name=name,
+            description=description,
             source_alias=source_alias,
         )
         if entry.get("baseline"):
