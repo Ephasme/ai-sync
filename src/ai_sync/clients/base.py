@@ -90,7 +90,7 @@ class Client(ABC):
 
     @abstractmethod
     def build_command_specs(
-        self, alias: str, slug: str, raw_content: str, command_src_path: Path
+        self, alias: str, slug: str, meta: dict, raw_content: str, command_name: str
     ) -> list[WriteSpec]: ...
 
     @abstractmethod

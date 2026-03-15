@@ -121,7 +121,7 @@ def resolve_op_refs(values: dict[str, str], config_root: Path | None = None) -> 
     content = "\n".join(lines)
     refs, line_to_ref = _extract_op_refs(lines)
 
-    cli_error: Exception | None = None
+    cli_error_msg: str | None = None
     try:
         env = os.environ.copy()
         env.update(_resolve_cli_env(config_root))
@@ -135,8 +135,10 @@ def resolve_op_refs(values: dict[str, str], config_root: Path | None = None) -> 
         )
         resolved_op = parse_injected_env(result.stdout)
         return {**plain_entries, **resolved_op}
+    except subprocess.CalledProcessError as exc:
+        cli_error_msg = _format_cli_error(exc.stderr or "")
     except Exception as exc:
-        cli_error = exc
+        cli_error_msg = str(exc)
 
     try:
         resolved_op = asyncio.run(
@@ -145,10 +147,33 @@ def resolve_op_refs(values: dict[str, str], config_root: Path | None = None) -> 
         return {**plain_entries, **resolved_op}
     except Exception as sdk_error:
         raise RuntimeError(
-            "Failed to resolve 1Password references.\n"
-            f"CLI: {cli_error}\n"
-            f"SDK: {sdk_error}"
+            f"Failed to resolve 1Password references.\nCLI: {cli_error_msg}\nSDK: {sdk_error}"
         ) from sdk_error
+
+
+def _format_sdk_failures(failures: list[tuple[str, object]]) -> str:
+    """Format SDK resolution failures, grouping vault-level errors."""
+    vault_not_found: set[str] = set()
+    other: list[str] = []
+
+    for ref, error in failures:
+        err_str = str(error)
+        if "vaultNotFound" in err_str:
+            parts = ref.removeprefix(OP_REF_PREFIX).split("/", 2)
+            vault_not_found.add(parts[0])
+        else:
+            other.append(f"  {ref}: {error}")
+
+    msgs: list[str] = []
+    if vault_not_found:
+        names = ", ".join(f"'{v}'" for v in sorted(vault_not_found))
+        msgs.append(
+            f"Vault not found: {names}. "
+            "Run `op vault list` to verify the name and check your OP_ACCOUNT."
+        )
+    if other:
+        msgs.append("Failed to resolve references:\n" + "\n".join(other))
+    return "\n".join(msgs)
 
 
 async def _resolve_op_refs_async(
@@ -164,11 +189,14 @@ async def _resolve_op_refs_async(
         integration_version="0.1.0",
     )
     response = await client.secrets.resolve_all(refs)
+    failures: list[tuple[str, object]] = []
     resolved: dict[str, str] = {}
     for ref, resp in response.individual_responses.items():
         if resp.error is not None:
-            raise RuntimeError(f"Failed to resolve {ref}: {resp.error}")
-        if resp.content:
+            failures.append((ref, resp.error))
+        elif resp.content:
             resolved[ref] = resp.content.secret
+    if failures:
+        raise RuntimeError(_format_sdk_failures(failures))
     injected = _inject_resolved(lines, line_to_ref, resolved)
     return parse_injected_env(injected)

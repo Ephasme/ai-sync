@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 from ai_sync import sync_runner
 from ai_sync.artifacts import _agent_artifacts, _command_artifacts, _skill_artifacts
@@ -52,9 +53,10 @@ class DummyClient(Client):
         ]
 
     def build_command_specs(
-        self, alias: str, slug: str, raw_content: str, command_src_path: Path
+        self, alias: str, slug: str, meta: dict, raw_content: str, command_name: str
     ) -> list[WriteSpec]:
-        prefixed = command_src_path.with_name(f"{alias}-{command_src_path.name}")
+        rel = Path(command_name)
+        prefixed = rel.with_name(f"{alias}-{rel.name}.md")
         return [
             WriteSpec(
                 file_path=self.config_dir / "commands" / prefixed,
@@ -88,17 +90,39 @@ def _resolved(alias: str, root: Path) -> ResolvedSource:
 
 def _make_repo_root(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
-    (root / "prompts").mkdir(parents=True)
-    (root / "skills" / "skill-one").mkdir(parents=True)
-    (root / "commands").mkdir(parents=True)
-    (root / "rules").mkdir(parents=True)
+    (root / "prompts" / "agent").mkdir(parents=True)
+    (root / "skills" / "skill-one" / "files").mkdir(parents=True)
+    (root / "commands" / "shortcut").mkdir(parents=True)
+    (root / "rules" / "commit").mkdir(parents=True)
     (root / "env.yaml").write_text("TOKEN:\n  value: abc\n", encoding="utf-8")
-    (root / "prompts" / "agent.md").write_text("## Task\nDo thing\n", encoding="utf-8")
-    (root / "skills" / "skill-one" / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
-    (root / "commands" / "shortcut.md").write_text("Do a thing\n", encoding="utf-8")
-    (root / "rules" / "commit.md").write_text("Commit rules\n", encoding="utf-8")
+    (root / "prompts" / "agent" / "artifact.yaml").write_text(
+        "slug: agent\n"
+        "name: Agent\n"
+        "description: General agent assistant\n",
+        encoding="utf-8",
+    )
+    (root / "prompts" / "agent" / "prompt.md").write_text("## Task\nDo thing\n", encoding="utf-8")
+    (root / "skills" / "skill-one" / "artifact.yaml").write_text(
+        "name: skill-one\n"
+        "description: Example skill\n"
+        "disable-model-invocation: true\n",
+        encoding="utf-8",
+    )
+    (root / "skills" / "skill-one" / "prompt.md").write_text("# Skill\n", encoding="utf-8")
+    (root / "skills" / "skill-one" / "files" / "reference.md").write_text("ref\n", encoding="utf-8")
+    (root / "commands" / "shortcut" / "artifact.yaml").write_text(
+        "description: A shortcut command\n",
+        encoding="utf-8",
+    )
+    (root / "commands" / "shortcut" / "prompt.md").write_text("Do a thing\n", encoding="utf-8")
+    (root / "rules" / "commit" / "artifact.yaml").write_text(
+        "description: Commit conventions\n"
+        "alwaysApply: true\n",
+        encoding="utf-8",
+    )
+    (root / "rules" / "commit" / "prompt.md").write_text("Commit rules\n", encoding="utf-8")
     (root / "mcp-servers" / "srv").mkdir(parents=True)
-    (root / "mcp-servers" / "srv" / "server.yaml").write_text(
+    (root / "mcp-servers" / "srv" / "artifact.yaml").write_text(
         'method: stdio\ncommand: npx\nenv:\n  TOKEN: "$TOKEN"\n',
         encoding="utf-8",
     )
@@ -248,9 +272,15 @@ def test_run_apply_removes_stale_rules(monkeypatch, tmp_path: Path) -> None:
 def test_skill_artifacts_include_all_files(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     skill_root = repo_root / "skills" / "skill-one"
-    skill_root.mkdir(parents=True)
-    (skill_root / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
-    (skill_root / "reference.md").write_text("ref\n", encoding="utf-8")
+    (skill_root / "files").mkdir(parents=True)
+    (skill_root / "artifact.yaml").write_text(
+        "name: skill-one\n"
+        "description: Example skill\n"
+        "disable-model-invocation: true\n",
+        encoding="utf-8",
+    )
+    (skill_root / "prompt.md").write_text("# Skill\n", encoding="utf-8")
+    (skill_root / "files" / "reference.md").write_text("ref\n", encoding="utf-8")
 
     project_root = tmp_path / "project"
     project_root.mkdir()
@@ -266,40 +296,63 @@ def test_skill_artifacts_include_all_files(tmp_path: Path) -> None:
     assert len(artifacts) == 1
 
     specs = artifacts[0].resolve()
-    names = {s.file_path.name for s in specs}
-    assert "SKILL.md" in names
-    assert "reference.md" in names
+    rel_paths = {s.file_path.relative_to(project_root / ".codex" / "skills" / "company-skill-one").as_posix() for s in specs}
+    assert "SKILL.md" in rel_paths
+    assert "reference.md" in rel_paths
+    assert "files/reference.md" not in rel_paths
+
+    skill_spec = next(spec for spec in specs if spec.file_path.name == "SKILL.md")
+    skill_value = cast(str, skill_spec.value)
+    assert skill_value.startswith(
+        "---\n"
+        "name: skill-one\n"
+        "description: Example skill\n"
+        "disable-model-invocation: true\n"
+        "---\n\n"
+    )
+    assert skill_value.endswith("# Skill\n")
 
 
 def test_command_artifacts_produce_write_specs(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
-    (repo_root / "commands").mkdir(parents=True)
-    (repo_root / "commands" / "shortcut.md").write_text("Do a thing\n", encoding="utf-8")
+    (repo_root / "commands" / "review" / "shortcut").mkdir(parents=True)
+    (repo_root / "commands" / "review" / "shortcut" / "artifact.yaml").write_text(
+        "description: A shortcut command\n",
+        encoding="utf-8",
+    )
+    (repo_root / "commands" / "review" / "shortcut" / "prompt.md").write_text("Do a thing\n", encoding="utf-8")
 
     project_root = tmp_path / "project"
     project_root.mkdir()
     client = DummyClient("codex", project_root, [])
+    display = FakeDisplay()
     resolved_sources = {"company": _resolved("company", repo_root)}
 
     manifest = ProjectManifest(
         sources={"company": SourceConfig(source=str(repo_root))},
-        commands=["company/shortcut.md"],
+        commands=["company/review/shortcut"],
     )
 
-    artifacts = _command_artifacts(manifest, resolved_sources, [client])
+    artifacts = _command_artifacts(manifest, resolved_sources, [client], display)
     assert len(artifacts) == 1
     assert artifacts[0].kind == "command"
 
     specs = artifacts[0].resolve()
     assert len(specs) == 1
     assert specs[0].value == "Do a thing\n"
-    assert "company-shortcut.md" in str(specs[0].file_path)
+    assert "review/company-shortcut.md" in str(specs[0].file_path)
 
 
 def test_agent_artifacts_use_scoped_alias(tmp_path: Path) -> None:
     repo_a = tmp_path / "repo-a"
-    (repo_a / "prompts").mkdir(parents=True)
-    (repo_a / "prompts" / "agent.md").write_text("## From A\n", encoding="utf-8")
+    (repo_a / "prompts" / "agent").mkdir(parents=True)
+    (repo_a / "prompts" / "agent" / "artifact.yaml").write_text(
+        "slug: agent\n"
+        "name: Agent\n"
+        "description: Agent from repo A\n",
+        encoding="utf-8",
+    )
+    (repo_a / "prompts" / "agent" / "prompt.md").write_text("## From A\n", encoding="utf-8")
 
     project_root = tmp_path / "project"
     project_root.mkdir()

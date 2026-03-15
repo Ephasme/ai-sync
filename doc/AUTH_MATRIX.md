@@ -115,7 +115,7 @@ gemini mcp add -s user -t http -H 'X-Goog-Api-Key: YOUR_KEY' maps-grounding-lite
 | **Callback URL**         | `mcp_oauth_callback_url = "https://..."` — custom redirect URL              |
 | **Stdio auth**           | Via `env` table — env vars passed to the subprocess                         |
 
-**Note on ai-sync**: `env_http_headers`, `http_headers`, and `bearer_token_env_var` are valid Codex config fields but are **not yet in ai-sync's `ServerConfig` model**. They cannot be set via `mcp-servers/<server-id>/server.yaml` today.
+**Note on ai-sync**: `env_http_headers`, `http_headers`, and `bearer_token_env_var` are valid Codex config fields but are **not yet in ai-sync's `ServerConfig` model**. They cannot be set via `mcp-servers/<server-id>/artifact.yaml` today.
 
 ---
 
@@ -237,10 +237,10 @@ The following fields are valid in each client's config format but are not yet ex
 
 Adding these fields to the model requires a decision: some fields are universal (e.g. `headers` is supported by all three clients), while others are client-specific (e.g. `bearer_token_env_var` is Codex-only, `authProviderType` is Gemini-only).
 
-A per-client override block in `mcp-servers/<server-id>/server.yaml` would solve both cases cleanly:
+A per-client override block in `mcp-servers/<server-id>/artifact.yaml` would solve both cases cleanly:
 
 ```yaml
-# mcp-servers/google-maps-grounding-lite/server.yaml
+# mcp-servers/google-maps-grounding-lite/artifact.yaml
 method: http
 httpUrl: https://mapstools.googleapis.com/mcp
 per_client:

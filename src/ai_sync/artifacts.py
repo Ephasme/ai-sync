@@ -19,7 +19,7 @@ from .clients.base import Client
 from .display import Display
 from .env_config import RuntimeEnv
 from .git_safety import SENSITIVE_PATHS
-from .helpers import extract_description, to_kebab_case
+from .helpers import to_kebab_case
 from .mcp_sync import resolve_servers_for_client
 from .path_ops import escape_path_segment
 from .project import ProjectManifest, split_scoped_ref
@@ -27,8 +27,8 @@ from .source_resolver import ResolvedSource
 from .track_write import WriteSpec
 
 SKIP_PATTERNS = {".venv", "node_modules", "__pycache__", ".git", ".DS_Store"}
-
-_GENERIC_METADATA_KEYS = {"slug", "name", "description"}
+BUNDLE_ARTIFACT_FILENAME = "artifact.yaml"
+BUNDLE_PROMPT_FILENAME = "prompt.md"
 
 
 @dataclass(frozen=True)
@@ -55,9 +55,10 @@ def collect_artifacts(
 ) -> list[Artifact]:
     return [
         *_agent_artifacts(manifest, resolved_sources, clients, display),
-        *_command_artifacts(manifest, resolved_sources, clients),
+        *_command_artifacts(manifest, resolved_sources, clients, display),
         *_skill_artifacts(manifest, resolved_sources, clients),
         *_rule_artifacts(manifest, resolved_sources, project_root),
+        *_client_rule_artifacts(manifest, resolved_sources, clients, display),
         *_rule_index_artifacts(manifest, project_root),
         *_mcp_artifacts(manifest, mcp_manifest, clients),
         *_env_artifacts(project_root, runtime_env),
@@ -81,28 +82,44 @@ def _agent_artifacts(
     artifacts: list[Artifact] = []
     for agent_ref in manifest.agents:
         alias, agent_name = split_scoped_ref(agent_ref)
-        source_root = resolved_sources[alias].root
-        prompt_path = source_root / "prompts" / f"{agent_name}.md"
-        if not prompt_path.exists():
+        agent_rel = Path(agent_name)
+        artifact_path = _bundle_entry_path(resolved_sources[alias].root / "prompts", agent_rel)
+        if not artifact_path.exists():
             raise RuntimeError(f"Selected agent {agent_ref!r} was not found.")
 
-        raw = prompt_path.read_text(encoding="utf-8")
-        meta = _load_prompt_metadata(prompt_path, raw, display)
-        slug = str(meta.get("slug") or to_kebab_case(prompt_path.stem))
+        meta, _ = _load_artifact_yaml(
+            artifact_path,
+            defaults={
+                "name": to_kebab_case(agent_rel.name),
+                "slug": to_kebab_case(agent_rel.name),
+            },
+            metadata_keys={"slug", "name", "description"},
+            required_keys={"description"},
+        )
+        slug = str(meta.get("slug") or to_kebab_case(agent_rel.name))
 
         for client in clients:
             prefixed_slug = f"{alias}-{slug}"
 
-            def make_resolve(p=prompt_path, c=client, a=alias, d=display):
+            def make_resolve(p=artifact_path, c=client, a=alias, rel=agent_rel):
                 def resolve():
-                    raw_content = p.read_text(encoding="utf-8")
-                    m = _load_prompt_metadata(p, raw_content, d)
-                    s = str(m.get("slug") or to_kebab_case(p.stem))
-                    return c.build_agent_specs(a, s, m, raw_content, p)
+                    m, raw_content = _load_artifact_yaml(
+                        p,
+                        defaults={
+                            "name": to_kebab_case(rel.name),
+                            "slug": to_kebab_case(rel.name),
+                        },
+                        metadata_keys={"slug", "name", "description"},
+                        required_keys={"description"},
+                    )
+                    s = str(m.get("slug") or to_kebab_case(rel.name))
+                    return c.build_agent_specs(a, s, m, raw_content, _bundle_prompt_path(p))
                 return resolve
 
             if client.name == "codex":
                 target = client.get_agents_dir() / prefixed_slug
+            elif client.name == "claude":
+                target = client.get_agents_dir() / f"{prefixed_slug}.md"
             else:
                 target = client.get_agents_dir() / f"{prefixed_slug}.md"
 
@@ -126,28 +143,36 @@ def _command_artifacts(
     manifest: ProjectManifest,
     resolved_sources: dict[str, ResolvedSource],
     clients: list[Client],
+    display: Display,
 ) -> list[Artifact]:
     artifacts: list[Artifact] = []
     for command_ref in manifest.commands:
-        alias, rel_posix = split_scoped_ref(command_ref)
-        command_path = resolved_sources[alias].root / "commands" / rel_posix
+        alias, command_name = split_scoped_ref(command_ref)
+        command_rel = Path(command_name)
+        command_path = _bundle_entry_path(resolved_sources[alias].root / "commands", command_rel)
         if not command_path.is_file():
             raise RuntimeError(f"Selected command {command_ref!r} was not found.")
-        rel = Path(rel_posix)
 
         for client in clients:
 
-            def make_resolve(p=command_path, c=client, a=alias, ref=command_ref, r=rel):
+            def make_resolve(
+                p=command_path,
+                c=client,
+                a=alias,
+                ref=command_ref,
+                name=command_rel.as_posix(),
+            ):
                 def resolve():
-                    raw_content = p.read_text(encoding="utf-8")
-                    return c.build_command_specs(a, ref, raw_content, r)
+                    meta, raw_content = _load_artifact_yaml(
+                        p,
+                        defaults={},
+                        metadata_keys={"description"},
+                        required_keys={"description"},
+                    )
+                    return c.build_command_specs(a, ref, meta, raw_content, name)
                 return resolve
 
-            prefixed = rel.with_name(f"{alias}-{rel.name}")
-            if rel.suffix == ".mdc":
-                target = client.config_dir / "rules" / prefixed
-            else:
-                target = client.config_dir / "commands" / prefixed
+            target = _command_target_path(client, alias, command_rel)
 
             artifacts.append(Artifact(
                 kind="command",
@@ -174,17 +199,18 @@ def _skill_artifacts(
     for skill_ref in manifest.skills:
         alias, skill_name = split_scoped_ref(skill_ref)
         skill_dir = resolved_sources[alias].root / "skills" / skill_name
-        if not (skill_dir.is_dir() and (skill_dir / "SKILL.md").exists()):
+        artifact_path = skill_dir / "artifact.yaml"
+        if not (skill_dir.is_dir() and artifact_path.exists()):
             raise RuntimeError(f"Selected skill {skill_ref!r} was not found.")
-        kebab_name = to_kebab_case(skill_name)
+        kebab_name = to_kebab_case(Path(skill_name).name)
         prefixed_name = f"{alias}-{kebab_name}"
 
         for client in clients:
             target_skill_dir = client.get_skills_dir() / prefixed_name
 
-            def make_resolve(sd=skill_dir, kn=kebab_name, tsd=target_skill_dir):
+            def make_resolve(ap=artifact_path, sd=skill_dir, kn=kebab_name, tsd=target_skill_dir):
                 def resolve():
-                    return _build_skill_specs(sd, kn, tsd)
+                    return _build_skill_specs(ap, sd, kn, tsd)
                 return resolve
 
             artifacts.append(Artifact(
@@ -198,10 +224,34 @@ def _skill_artifacts(
     return artifacts
 
 
-def _build_skill_specs(skill_dir: Path, kebab_name: str, target_skill_dir: Path) -> list[WriteSpec]:
+def _build_skill_specs(
+    artifact_path: Path,
+    skill_dir: Path,
+    kebab_name: str,
+    target_skill_dir: Path,
+) -> list[WriteSpec]:
     specs: list[WriteSpec] = []
-    for sub in skill_dir.rglob("*"):
-        rel = sub.relative_to(skill_dir)
+    meta, prompt = _load_artifact_yaml(
+        artifact_path,
+        defaults={"name": kebab_name},
+        metadata_keys=None,
+        required_keys={"description"},
+    )
+    specs.append(
+        WriteSpec(
+            file_path=target_skill_dir / "SKILL.md",
+            format="text",
+            target=f"ai-sync:skill:{kebab_name}:SKILL.md",
+            value=_render_skill_markdown(meta, prompt),
+        )
+    )
+
+    files_dir = skill_dir / "files"
+    if not files_dir.is_dir():
+        return specs
+
+    for sub in files_dir.rglob("*"):
+        rel = sub.relative_to(files_dir)
         if any(part in SKIP_PATTERNS for part in rel.parts) or sub.is_dir():
             continue
         target = target_skill_dir / rel
@@ -238,7 +288,7 @@ def _rule_artifacts(
 
     for rule_ref in manifest.rules:
         alias, rule_name = split_scoped_ref(rule_ref)
-        rule_path = resolved_sources[alias].root / "rules" / f"{rule_name}.md"
+        rule_path = _bundle_entry_path(resolved_sources[alias].root / "rules", Path(rule_name))
         if not rule_path.exists():
             raise RuntimeError(f"Selected rule {rule_ref!r} was not found.")
 
@@ -248,7 +298,12 @@ def _rule_artifacts(
 
         def make_resolve(p=rule_path, t=target, mid=marker_id):
             def resolve():
-                content = p.read_text(encoding="utf-8")
+                _, content = _load_artifact_yaml(
+                    p,
+                    defaults={"alwaysApply": True},
+                    metadata_keys={"description", "alwaysApply", "globs"},
+                    required_keys={"description"},
+                )
                 return [WriteSpec(file_path=t, format="text", target=mid, value=content)]
             return resolve
 
@@ -260,6 +315,52 @@ def _rule_artifacts(
             secret_backed=False,
             resolve_fn=make_resolve(),
         ))
+    return artifacts
+
+
+def _client_rule_artifacts(
+    manifest: ProjectManifest,
+    resolved_sources: dict[str, ResolvedSource],
+    clients: list[Client],
+    display: Display,
+) -> list[Artifact]:
+    artifacts: list[Artifact] = []
+    for rule_ref in manifest.rules:
+        alias, rule_name = split_scoped_ref(rule_ref)
+        rule_path = _bundle_entry_path(resolved_sources[alias].root / "rules", Path(rule_name))
+        if not rule_path.exists():
+            raise RuntimeError(f"Selected rule {rule_ref!r} was not found.")
+
+        prefixed_name = f"{alias}-{rule_name}"
+        marker_id = f"ai-sync:rule:{prefixed_name}:client"
+        for client in clients:
+            if client.name != "claude":
+                continue
+            target = client.config_dir / "rules" / f"{prefixed_name}.md"
+
+            def make_resolve(p=rule_path, t=target, mid=marker_id):
+                def resolve():
+                    metadata, content = _load_artifact_yaml(
+                        p,
+                        defaults={"alwaysApply": True},
+                        metadata_keys={"description", "alwaysApply", "globs"},
+                        required_keys={"description"},
+                    )
+                    rendered = _render_claude_rule(content, metadata)
+                    return [WriteSpec(file_path=t, format="text", target=mid, value=rendered)]
+
+                return resolve
+
+            artifacts.append(
+                Artifact(
+                    kind="rule",
+                    resource=rule_ref,
+                    source_alias=alias,
+                    plan_key=str(target),
+                    secret_backed=False,
+                    resolve_fn=make_resolve(),
+                )
+            )
     return artifacts
 
 
@@ -328,6 +429,9 @@ def _mcp_artifacts(
             if client.name == "codex":
                 target_file = client.config_dir / "config.toml"
                 plan_key = f"{target_file}#/mcp_servers/{prefixed_id}"
+            elif client.name == "claude":
+                target_file = client.config_dir.parent / ".mcp.json"
+                plan_key = f"{target_file}#/mcpServers/{prefixed_id}"
             else:
                 target_file = client.config_dir / ("mcp.json" if client.name == "cursor" else "settings.json")
                 plan_key = f"{target_file}#/mcpServers/{prefixed_id}"
@@ -478,25 +582,90 @@ def _gitignore_artifacts(project_root: Path) -> list[Artifact]:
 # ---------------------------------------------------------------------------
 
 
-def _load_prompt_metadata(prompt_path: Path, content: str, display: Display) -> dict:
-    metadata_path = prompt_path.with_suffix(".metadata.yaml")
-    result: dict = {
-        "name": to_kebab_case(prompt_path.stem),
-        "description": extract_description(content),
-        "slug": to_kebab_case(prompt_path.stem),
-    }
-    if not metadata_path.exists():
-        return result
+def _command_target_path(client: Client, alias: str, command_rel: Path) -> Path:
+    if client.name == "gemini":
+        return client.config_dir / "commands" / command_rel.with_name(f"{alias}-{command_rel.name}.toml")
+    return client.config_dir / "commands" / command_rel.with_name(f"{alias}-{command_rel.name}.md")
+
+
+def _bundle_entry_path(base_dir: Path, artifact_rel: Path) -> Path:
+    return base_dir / artifact_rel / BUNDLE_ARTIFACT_FILENAME
+
+
+def _bundle_prompt_path(artifact_path: Path) -> Path:
+    return artifact_path.with_name(BUNDLE_PROMPT_FILENAME)
+
+
+def _load_artifact_yaml(
+    artifact_path: Path,
+    *,
+    defaults: dict[str, object],
+    metadata_keys: set[str] | None,
+    required_keys: set[str],
+) -> tuple[dict, str]:
+    result = dict(defaults)
     try:
-        data = yaml.safe_load(metadata_path.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(artifact_path.read_text(encoding="utf-8")) or {}
     except (yaml.YAMLError, OSError) as exc:
-        display.print(f"Warning: failed to load metadata for {prompt_path.name}: {exc}", style="warning")
-        return result
-    if isinstance(data, dict):
-        for key in _GENERIC_METADATA_KEYS:
+        raise RuntimeError(
+            f"Failed to load artifact file {artifact_path.name}: {exc}"
+        ) from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(
+            f"Artifact file {artifact_path.name} must contain a YAML mapping."
+        )
+    if "prompt" in data:
+        raise RuntimeError(
+            f"Artifact file {artifact_path.name} must not define an inline 'prompt' field. "
+            f"Move the markdown body to {BUNDLE_PROMPT_FILENAME}."
+        )
+    if metadata_keys is None:
+        for key, value in data.items():
+            if value is not None:
+                result[key] = value
+    else:
+        for key in metadata_keys:
             if key in data and data[key] is not None:
                 result[key] = data[key]
-    return result
+    missing_keys = sorted(key for key in required_keys if key not in result)
+    if missing_keys:
+        raise RuntimeError(
+            f"Artifact file {artifact_path.name} must include: {', '.join(missing_keys)}"
+        )
+    prompt_path = _bundle_prompt_path(artifact_path)
+    if not prompt_path.is_file():
+        raise RuntimeError(
+            f"Artifact bundle {artifact_path.parent} must include {BUNDLE_PROMPT_FILENAME}."
+        )
+    try:
+        prompt = prompt_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(
+            f"Failed to load prompt file {prompt_path.name}: {exc}"
+        ) from exc
+    return result, prompt
+
+
+def _render_skill_markdown(meta: dict, prompt: str) -> str:
+    frontmatter = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True).strip()
+    body = prompt if prompt.endswith("\n") else f"{prompt}\n"
+    return f"---\n{frontmatter}\n---\n\n{body}"
+
+
+def _render_claude_rule(raw_content: str, meta: dict) -> str:
+    description = str(meta.get("description", "Project rule"))
+    always_apply = bool(meta.get("alwaysApply", True))
+    lines = [
+        "---",
+        f"description: {json.dumps(description)}",
+        f"alwaysApply: {'true' if always_apply else 'false'}",
+    ]
+    globs = meta.get("globs")
+    if isinstance(globs, list) and globs:
+        lines.append(f"globs: {json.dumps([str(item) for item in globs])}")
+    lines.append("---")
+    body = raw_content.lstrip()
+    return "\n".join(lines) + "\n\n" + body
 
 
 def _parse_structured_content(content: str, fmt: str) -> dict | list:

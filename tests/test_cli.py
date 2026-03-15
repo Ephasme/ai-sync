@@ -28,16 +28,36 @@ def _write_project(tmp_path: Path, *, with_gitignore: bool = True) -> tuple[Path
     (config_root / "config.toml").write_text('op_account_identifier = "x.1password.com"\n', encoding="utf-8")
 
     source_root = tmp_path / "company-source"
-    (source_root / "prompts").mkdir(parents=True)
-    (source_root / "prompts" / "engineer.md").write_text("## Task\nHelp\n", encoding="utf-8")
-    (source_root / "skills" / "code-review").mkdir(parents=True)
-    (source_root / "skills" / "code-review" / "SKILL.md").write_text("# Skill\n", encoding="utf-8")
-    (source_root / "commands").mkdir(parents=True)
-    (source_root / "commands" / "session-summary.md").write_text("Summarize\n", encoding="utf-8")
-    (source_root / "rules").mkdir(parents=True)
-    (source_root / "rules" / "commit.md").write_text("Commit rules\n", encoding="utf-8")
+    (source_root / "prompts" / "engineer").mkdir(parents=True)
+    (source_root / "prompts" / "engineer" / "artifact.yaml").write_text(
+        "slug: engineer\n"
+        "name: Engineer\n"
+        "description: Senior software engineer assistant\n",
+        encoding="utf-8",
+    )
+    (source_root / "prompts" / "engineer" / "prompt.md").write_text("## Task\nHelp\n", encoding="utf-8")
+    (source_root / "skills" / "code-review" / "files").mkdir(parents=True)
+    (source_root / "skills" / "code-review" / "artifact.yaml").write_text(
+        "name: code-review\n"
+        "description: Review code skill\n",
+        encoding="utf-8",
+    )
+    (source_root / "skills" / "code-review" / "prompt.md").write_text("# Skill\n", encoding="utf-8")
+    (source_root / "commands" / "session-summary").mkdir(parents=True)
+    (source_root / "commands" / "session-summary" / "artifact.yaml").write_text(
+        "description: Session summary command\n",
+        encoding="utf-8",
+    )
+    (source_root / "commands" / "session-summary" / "prompt.md").write_text("Summarize\n", encoding="utf-8")
+    (source_root / "rules" / "commit").mkdir(parents=True)
+    (source_root / "rules" / "commit" / "artifact.yaml").write_text(
+        "description: Commit conventions\n"
+        "alwaysApply: true\n",
+        encoding="utf-8",
+    )
+    (source_root / "rules" / "commit" / "prompt.md").write_text("Commit rules\n", encoding="utf-8")
     (source_root / "mcp-servers" / "context7").mkdir(parents=True)
-    (source_root / "mcp-servers" / "context7" / "server.yaml").write_text(
+    (source_root / "mcp-servers" / "context7" / "artifact.yaml").write_text(
         "method: stdio\ncommand: npx\n",
         encoding="utf-8",
     )
@@ -57,7 +77,7 @@ def _write_project(tmp_path: Path, *, with_gitignore: bool = True) -> tuple[Path
                 "skills:",
                 "  - company/code-review",
                 "commands:",
-                "  - company/session-summary.md",
+                "  - company/session-summary",
                 "rules:",
                 "  - company/commit",
                 "mcp-servers:",

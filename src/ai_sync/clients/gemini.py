@@ -42,20 +42,21 @@ tools: {json.dumps(meta.get("tools", ["google_web_search"]))}
         ]
 
     def build_command_specs(
-        self, alias: str, slug: str, raw_content: str, command_src_path: Path
+        self, alias: str, slug: str, meta: dict, raw_content: str, command_name: str
     ) -> list[WriteSpec]:
-        if command_src_path.suffix == ".mdc":
-            target_dir = self.config_dir / "rules"
-        else:
-            target_dir = self.config_dir / "commands"
-        prefixed = command_src_path.with_name(f"{alias}-{command_src_path.name}")
-        target_path = target_dir / prefixed
+        rel = Path(command_name)
+        target_path = self.config_dir / "commands" / rel.with_name(f"{alias}-{rel.name}.toml")
+        toml_data: dict = {}
+        if meta.get("description"):
+            toml_data["description"] = str(meta["description"]).strip()
+        toml_data["prompt"] = raw_content.strip()
+        toml_content = self._write_toml_config(toml_data)
         return [
             WriteSpec(
                 file_path=target_path,
                 format="text",
                 target=f"ai-sync:command:{slug}",
-                value=raw_content,
+                value=toml_content,
             )
         ]
 

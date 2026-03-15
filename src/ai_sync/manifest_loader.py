@@ -23,9 +23,12 @@ def load_manifest(mcp_root: Path, display: Display) -> dict:
     for server_dir in sorted(servers_dir.iterdir()):
         if not server_dir.is_dir():
             continue
-        config_path = server_dir / "server.yaml"
+        config_path = server_dir / "artifact.yaml"
         if not config_path.exists():
-            display.print(f"Skipping malformed MCP server directory without server.yaml: {server_dir}", style="warning")
+            display.print(
+                f"Skipping malformed MCP server directory without artifact.yaml: {server_dir}",
+                style="warning",
+            )
             continue
         servers[server_dir.name] = _load_server_config(config_path)
 

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import tomli as tomllib
 
+from ai_sync.clients.claude import ClaudeClient
 from ai_sync.clients.codex import CodexClient
 from ai_sync.clients.cursor import CursorClient
 from ai_sync.clients.gemini import GeminiClient
@@ -139,31 +140,22 @@ def test_cursor_write_command(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     store = StateStore(tmp_path)
     client = CursorClient(tmp_path)
-    specs = client.build_command_specs("default", "shortcut", "Run command", Path("shortcut.md"))
+    meta = {"description": "A shortcut command"}
+    specs = client.build_command_specs("default", "review/shortcut", meta, "Run command", "review/shortcut")
     track_write_blocks(specs, store)
-    cmd_path = tmp_path / ".cursor" / "commands" / "default-shortcut.md"
+    cmd_path = tmp_path / ".cursor" / "commands" / "review" / "default-shortcut.md"
     assert cmd_path.exists()
     assert "Run command" in cmd_path.read_text(encoding="utf-8")
-
-
-def test_cursor_write_command_mdc(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    store = StateStore(tmp_path)
-    client = CursorClient(tmp_path)
-    specs = client.build_command_specs("default", "guide", "Guide content", Path("guide.mdc"))
-    track_write_blocks(specs, store)
-    cmd_path = tmp_path / ".cursor" / "rules" / "default-guide.mdc"
-    assert cmd_path.exists()
-    assert "Guide content" in cmd_path.read_text(encoding="utf-8")
 
 
 def test_codex_write_command(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     store = StateStore(tmp_path)
     client = CodexClient(tmp_path)
-    specs = client.build_command_specs("default", "shortcut", "Run command", Path("shortcut.md"))
+    meta = {"description": "A shortcut command"}
+    specs = client.build_command_specs("default", "review/shortcut", meta, "Run command", "review/shortcut")
     track_write_blocks(specs, store)
-    cmd_path = tmp_path / ".codex" / "commands" / "default-shortcut.md"
+    cmd_path = tmp_path / ".codex" / "commands" / "review" / "default-shortcut.md"
     assert cmd_path.exists()
     assert "Run command" in cmd_path.read_text(encoding="utf-8")
 
@@ -172,9 +164,66 @@ def test_gemini_write_command(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     store = StateStore(tmp_path)
     client = GeminiClient(tmp_path)
-    specs = client.build_command_specs("default", "shortcut", "Run command", Path("shortcut.md"))
+    meta = {"description": "A shortcut command"}
+    specs = client.build_command_specs("default", "review/shortcut", meta, "Run command", "review/shortcut")
     track_write_blocks(specs, store)
-    cmd_path = tmp_path / ".gemini" / "commands" / "default-shortcut.md"
+    cmd_path = tmp_path / ".gemini" / "commands" / "review" / "default-shortcut.toml"
+    assert cmd_path.exists()
+    content = cmd_path.read_text(encoding="utf-8")
+    assert 'description = "A shortcut command"' in content
+    assert 'prompt = "Run command"' in content
+
+
+def test_claude_sync_mcp_and_config(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    store = StateStore(tmp_path)
+    client = ClaudeClient(tmp_path)
+    servers = {
+        "default-s1": {
+            "method": "http",
+            "url": "https://x",
+            "headers": {"Authorization": "Bearer token"},
+            "env": {"A": "B"},
+        }
+    }
+    secrets = {"servers": {"default-s1": {"env": {"SECRET": "1"}}}}
+    specs = client.build_mcp_specs(servers, secrets)
+    track_write_blocks(specs, store)
+    data = json.loads((tmp_path / ".mcp.json").read_text(encoding="utf-8"))
+    assert data["mcpServers"]["default-s1"]["type"] == "http"
+    assert data["mcpServers"]["default-s1"]["url"] == "https://x"
+    assert data["mcpServers"]["default-s1"]["env"]["SECRET"] == "1"
+
+    specs = client.build_client_config_specs({"mode": "strict"})
+    track_write_blocks(specs, store)
+    cfg = json.loads((tmp_path / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert cfg["$schema"] == "https://json.schemastore.org/claude-code-settings.json"
+    assert cfg["permissions"]["allow"] == []
+
+
+def test_claude_write_agent(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    store = StateStore(tmp_path)
+    client = ClaudeClient(tmp_path)
+    meta = {"description": "A test agent"}
+    specs = client.build_agent_specs("default", "my-agent", meta, "Task content", Path("agent.md"))
+    track_write_blocks(specs, store)
+    agent_path = tmp_path / ".claude" / "agents" / "default-my-agent.md"
+    assert agent_path.exists()
+    content = agent_path.read_text(encoding="utf-8")
+    assert "Task content" in content
+    assert "name: \"default-my-agent\"" in content
+    assert '"A test agent"' in content
+
+
+def test_claude_write_command(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    store = StateStore(tmp_path)
+    client = ClaudeClient(tmp_path)
+    meta = {"description": "A shortcut command"}
+    specs = client.build_command_specs("default", "review/shortcut", meta, "Run command", "review/shortcut")
+    track_write_blocks(specs, store)
+    cmd_path = tmp_path / ".claude" / "commands" / "review" / "default-shortcut.md"
     assert cmd_path.exists()
     assert "Run command" in cmd_path.read_text(encoding="utf-8")
 

@@ -251,7 +251,7 @@ When a server has `oauth.enabled: true`, ai-sync behaves differently per client:
 No special handling needed. All three clients handle the OAuth flow automatically.
 
 ```yaml
-# mcp-servers/my-server/server.yaml
+# mcp-servers/my-server/artifact.yaml
 method: http
 httpUrl: https://mcp.example.com/mcp
 # no oauth section needed — DCR is automatic
@@ -262,7 +262,7 @@ httpUrl: https://mcp.example.com/mcp
 Use stdio + `mcp-remote --static-oauth-client-info` for Codex and Cursor. Gemini can also use this approach (works fine), or use the native `oauth` section with pre-registered credentials.
 
 ```yaml
-# mcp-servers/my-server/server.yaml — universal workaround
+# mcp-servers/my-server/artifact.yaml — universal workaround
 method: stdio
 command: sh
 args:
@@ -275,7 +275,7 @@ env:
   MY_CLIENT_SECRET: "${MY_CLIENT_SECRET}"
 ```
 
-> **Note on `$$` escaping**: ai-sync's `env_loader.py` treats `$$` as an escape for a literal `$`. So `$$MY_CLIENT_ID` in `mcp-servers/<server-id>/server.yaml` becomes `$MY_CLIENT_ID` in the generated config file, which the shell then expands at runtime from the `env` section.
+> **Note on `$$` escaping**: ai-sync's `env_loader.py` treats `$$` as an escape for a literal `$`. So `$$MY_CLIENT_ID` in `mcp-servers/<server-id>/artifact.yaml` becomes `$MY_CLIENT_ID` in the generated config file, which the shell then expands at runtime from the `env` section.
 
 > **Redirect URI**: `mcp-remote` on port 3335 uses `http://localhost:3335/oauth/callback` as the redirect URI. For **Google "Desktop app" OAuth clients**, any `http://localhost` redirect (any port, any path) is automatically allowed — no pre-registration in the Cloud Console is needed. For **Google "Web application" OAuth clients**, you would need to explicitly register the URI, but Desktop clients handle this transparently by design.
 
@@ -284,7 +284,7 @@ env:
 For Gemini, consider using `google_credentials` instead of `mcp-remote` — it avoids the browser flow entirely if the user already has ADC set up:
 
 ```yaml
-# mcp-servers/my-google-server/server.yaml — Gemini-native approach
+# mcp-servers/my-google-server/artifact.yaml — Gemini-native approach
 method: http
 httpUrl: https://my-gcp-service.run.app/mcp
 oauth:

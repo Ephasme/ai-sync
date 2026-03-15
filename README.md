@@ -1,6 +1,6 @@
 # `ai-sync`
 
-`ai-sync` synchronizes shared AI tooling artifacts into a project-local setup for Codex, Cursor, and Gemini.
+`ai-sync` synchronizes shared AI tooling artifacts into a project-local setup for Codex, Cursor, Gemini, and Claude Code.
 
 The current workflow is:
 
@@ -71,7 +71,7 @@ skills:
   - frontend/react-review
 
 commands:
-  - company/session-summary.md
+  - company/session-summary
 
 rules:
   - company/commit-conventions
@@ -141,23 +141,76 @@ A source repo is a catalog of reusable artifacts:
 ```text
 <source>/
 ├── prompts/
+│   └── <artifact-id>/
+│       ├── artifact.yaml
+│       ├── prompt.md
+│       └── files/...   # optional reserved bundle assets
 ├── skills/
+│   └── <artifact-id>/
+│       ├── artifact.yaml
+│       ├── prompt.md
+│       └── files/...
 ├── commands/
+│   └── <relative-path>/
+│       ├── artifact.yaml
+│       ├── prompt.md
+│       └── files/...   # optional reserved bundle assets
 ├── rules/
+│   └── <artifact-id>/
+│       ├── artifact.yaml
+│       ├── prompt.md
+│       └── files/...   # optional reserved bundle assets
 ├── mcp-servers/
 │   └── <server-id>/
-│       └── server.yaml
+│       └── artifact.yaml
 ├── requirements.yaml
 └── env.yaml
 ```
 
 ### Resource ids
 
-- Agents come from `prompts/<name>.md` and are referenced as `<alias>/<name>`.
-- Skills come from `skills/<name>/SKILL.md` and are referenced as `<alias>/<name>`.
-- Commands come from `commands/**/<name>.<ext>` and are referenced as `<alias>/<relative-path>`.
-- Rules come from `rules/<name>.md` and are referenced as `<alias>/<name>`.
-- MCP servers come from `mcp-servers/<server-id>/server.yaml` and are referenced as `<alias>/<server-id>`.
+- Agents come from `prompts/<name>/artifact.yaml` plus `prompts/<name>/prompt.md` and are referenced as `<alias>/<name>`.
+- Skills come from `skills/<name>/artifact.yaml` plus `skills/<name>/prompt.md` and are referenced as `<alias>/<name>`.
+- Commands come from `commands/**/<name>/artifact.yaml` plus sibling `prompt.md` and are referenced as `<alias>/<relative-path>`.
+- Rules come from `rules/<name>/artifact.yaml` plus `rules/<name>/prompt.md` and are referenced as `<alias>/<name>`.
+- MCP servers come from `mcp-servers/<server-id>/artifact.yaml` and are referenced as `<alias>/<server-id>`.
+
+### Bundle artifact format
+
+Every artifact bundle uses the same entry-file convention:
+
+```text
+<bundle>/
+├── artifact.yaml
+├── prompt.md   # prompt-bearing bundles only
+└── files/...   # optional bundled assets
+```
+
+For prompts, skills, commands, and rules, `artifact.yaml` stores metadata only. The markdown body lives in sibling `prompt.md`:
+
+```text
+<bundle>/
+├── artifact.yaml
+└── prompt.md
+```
+
+Example command bundle:
+
+```yaml
+description: Session summary command
+```
+
+```md
+Summarize the current session.
+```
+
+Notes:
+
+- For prompts and rules, default ids are derived from the bundle directory name, not from the literal filename `artifact.yaml`.
+- Skills are authored from `artifact.yaml` plus `prompt.md`; `ai-sync` generates the client-facing `SKILL.md` during sync.
+- Skill assets live under `skills/<name>/files/...` in the source repo and are written to the client skill root without the `files/` prefix (for example `files/scripts/tool.py` becomes `scripts/tool.py`).
+- Non-skill prompt-bearing bundles may also reserve `files/` in the source repo, but `ai-sync` does not sync those assets to client outputs yet.
+- To migrate older inline `prompt:` bundles, use `migration/scripts/migrate_to_split_prompt_bundles.py`.
 
 ## Secrets
 
@@ -187,18 +240,21 @@ Rules:
 
 `ai-sync` manages project-local files such as:
 
-- `AGENTS.generated.md`
 - `.codex/*`
 - `.cursor/*`
 - `.gemini/*`
+- `.claude/*`
+- `.mcp.json`
+- `CLAUDE.md`
 - `.env.ai-sync`
+- `.ai-sync/rules/`
 - `.ai-sync/state/`
 - `.ai-sync/sources/`
 - `.ai-sync/last-plan.yaml`
 
-It does not modify machine-global client config under `~/.codex`, `~/.cursor`, or `~/.gemini`.
+It does not modify machine-global client config under `~/.codex`, `~/.cursor`, `~/.gemini`, or `~/.claude`.
 
-When rules are selected, `ai-sync` writes the merged content to `AGENTS.generated.md` and maintains a small managed link block in `AGENTS.md` instead of replacing the whole file.
+When rules are selected, `ai-sync` writes rule files to `.ai-sync/rules/` and maintains a small managed link block in `AGENTS.md` instead of replacing the whole file.
 
 You should usually cover these paths and `.ai-sync.local.yaml` with `.gitignore`, but `ai-sync` no longer blocks `plan` or `apply` when they are not ignored.
 

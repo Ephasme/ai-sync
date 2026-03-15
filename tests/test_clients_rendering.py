@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from ai_sync.clients.claude import ClaudeClient
 from ai_sync.clients.codex import CodexClient
 from ai_sync.clients.cursor import CursorClient
 from ai_sync.clients.gemini import GeminiClient
@@ -125,6 +126,31 @@ def test_codex_build_mcp_entry_env_merges_secrets() -> None:
     assert entry["env"]["SECRET"] == "2"
 
 
+def test_claude_build_mcp_entry_http() -> None:
+    client = ClaudeClient(Path("/tmp/test"))
+    entry = client._build_mcp_entry(
+        "s",
+        {"method": "http", "url": "https://x", "headers": {"Authorization": "Bearer tok"}},
+        {"servers": {}},
+    )
+    assert entry["type"] == "http"
+    assert entry["url"] == "https://x"
+    assert entry["headers"] == {"Authorization": "Bearer tok"}
+
+
+def test_claude_build_mcp_entry_stdio_with_secret_env() -> None:
+    client = ClaudeClient(Path("/tmp/test"))
+    entry = client._build_mcp_entry(
+        "s",
+        {"method": "stdio", "command": "npx", "args": ["srv"], "env": {"PUBLIC": "1"}},
+        {"servers": {"s": {"env": {"SECRET": "2"}}}},
+    )
+    assert entry["type"] == "stdio"
+    assert entry["command"] == "npx"
+    assert entry["env"]["PUBLIC"] == "1"
+    assert entry["env"]["SECRET"] == "2"
+
+
 # ---------------------------------------------------------------------------
 # _build_client_config (unit, no filesystem)
 # ---------------------------------------------------------------------------
@@ -198,3 +224,14 @@ class TestGeminiBuildClientConfig:
     def test_sandbox_from_tools_setting(self) -> None:
         cfg = GeminiClient(Path("/tmp/test"))._build_client_config({"mode": "unknown", "tools": {"sandbox": True}})
         assert cfg["tools"]["sandbox"] is True
+
+
+class TestClaudeBuildClientConfig:
+    def test_normal(self) -> None:
+        cfg = ClaudeClient(Path("/tmp/test"))._build_client_config({"mode": "normal"})
+        assert cfg["$schema"] == "https://json.schemastore.org/claude-code-settings.json"
+        assert cfg["permissions"]["allow"] == ["Bash(*)"]
+
+    def test_strict(self) -> None:
+        cfg = ClaudeClient(Path("/tmp/test"))._build_client_config({"mode": "strict"})
+        assert cfg["permissions"]["allow"] == []

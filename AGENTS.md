@@ -1,69 +1,66 @@
-# AGENTS.md
+# AI Assistant Instructions
 
-This workspace is a multi-project `ai-sync` working area, not a single git repo. Run git commands from the relevant subproject directory.
+This file defines project-level guidance for coding assistants working in this repository.
 
-## Workspace Map
+## Project Goal
 
-- `ai-sync-core/`: main Python package and CLI implementation.
-- `ai-sync-config-example/`: reference `ai-sync` source repo template.
-- other `ai-sync-config-*` directories in this workspace: concrete config repos; treat them as content/config unless the task says otherwise.
+`ai-sync` keeps AI tooling configuration project-scoped, reproducible, and safe across supported clients (Codex, Cursor, Gemini, Claude Code).
+It syncs reusable resources from source repos into local project outputs so teams share the same assistant behavior without relying on machine-global setup.
 
-## Working In `ai-sync-core`
+## Vocabulary
 
-- Use Python `>=3.11`.
-- Install dev dependencies with `poetry sync --with dev`.
-- Preferred commands:
-  - `just test`
-  - `just typecheck`
-  - `just lint`
-  - `just fix`
-- Application code lives in `src/ai_sync/`.
-- Tests live in `tests/`.
-- Match the existing style: typed Python, small focused functions, and targeted behavior changes.
-- Add or update tests when changing CLI behavior, planning logic, syncing logic, or manifest validation.
+- **Source**: a local or remote repository that provides reusable AI resources.
+- **Manifest**: `.ai-sync.yaml` (or `.ai-sync.local.yaml`) that declares sources and selected resources.
+- **Scoped reference**: `<sourceAlias>/<resourceId>` identifier used to select a resource from a source.
+- **Artifacts**: normalized internal representation of selected resources before writing files.
+- **Plan**: computed action set (writes/deletes/updates) generated from current manifest + sources.
+- **Apply**: execution step that performs the planned writes in the project.
+- **Managed outputs**: files/directories owned or partially managed by `ai-sync` (for example `.codex/`, `.cursor/`, `.gemini/`, `.claude/`, `.ai-sync/*`, and selected managed blocks in markdown files).
 
-## Python Best Practices
+## Python Coding Best Practices (Consensus)
 
-- Prefer explicit type hints on public functions, dataclasses, and complex locals when they improve readability.
-- Use `pathlib.Path` for filesystem work instead of stringly-typed path manipulation.
-- Keep functions small and side effects obvious; extract pure helpers for parsing, validation, and planning logic.
-- Validate external input at boundaries and fail with actionable error messages.
-- Prefer standard library solutions unless a dependency clearly simplifies the design.
-- Avoid hidden global state; pass dependencies such as paths, display objects, or resolved config explicitly.
-- Preserve existing style around structured models, dataclasses, and `pydantic` validation rather than introducing parallel patterns.
+- MUST preserve readability and consistency: simple control flow, clear names, and small focused functions.
+- MUST use type hints on public interfaces and important internal boundaries.
+- MUST isolate side effects (filesystem, network, env, subprocess) at boundaries; keep core logic testable.
+- SHOULD add docstrings for public modules, classes, and functions, including behavior and failure modes.
+- SHOULD use structured logging for diagnostics in reusable code.
+- MUST raise precise exceptions with actionable messages and fail fast on invalid input.
 
-## Architecture Best Practices
+## CLI Architecture Best Practices (Consensus)
 
-- Keep the CLI layer thin: argument parsing and user interaction in CLI modules, business logic in focused library modules.
-- Separate concerns cleanly: config loading, source resolution, planning, rendering, and apply/sync steps should stay distinct.
-- Isolate filesystem, subprocess, network, and secret-resolution code behind small functions so behavior is easier to test.
-- Prefer deterministic, idempotent operations; planning should be predictable from inputs and apply should avoid surprising side effects.
-- Extend existing modules and abstractions before adding new cross-cutting patterns or frameworks.
-- When a change touches multiple layers, keep interfaces narrow and document invariants in code with concise names or short comments where needed.
+- MUST keep a small `main()` entrypoint and modular command handlers.
+- MUST return explicit exit codes: `0` on success, non-zero on failure.
+- MUST write user-facing errors to `stderr`.
+- MUST provide clear `--help` and `--version` behavior.
+- SHOULD use subcommands for distinct operations (`plan`, `apply`, `doctor`, etc.) and keep argument names stable.
+- SHOULD keep CLI UX predictable: options first, `--` delimiter support, and consistent flag naming.
 
-## Keep It Greenfield
+## Core Expectations
 
-- Prefer replacing and deleting old code over keeping compatibility shims, aliases, fallback paths, or parallel implementations.
-- When behavior, APIs, files, or names are removed, remove all code, tests, fixtures, comments, and docs that reference the old behavior in the same change when practical.
-- A refactor or behavior change is not complete until stale references have been actively searched for and removed across implementation code, tests, fixtures, and documentation.
-- Do not leave dead code behind: remove unused functions, stale helpers, obsolete branches, commented-out code, unused flags, and unreachable paths instead of marking them for later cleanup.
-- Tests should describe current behavior only; do not keep references to removed commands, modules, error messages, or historical behavior unless the task is explicitly about a migration.
-- Avoid "legacy" preservation by default. If backward compatibility is truly required, make it explicit, minimal, and time-bounded.
-- If a new design supersedes an old one, migrate callers and delete the superseded path rather than keeping both architectures alive.
-- Prefer renaming or rewriting tests and helpers to match current concepts exactly instead of carrying outdated names forward.
+- Keep changes minimal, targeted, and reversible.
+- Prefer correctness and explicitness over clever shortcuts.
+- Preserve existing behavior unless a change request explicitly asks for behavioral changes.
+- Add or update tests when behavior changes.
 
-## Working In Config Repos
+## Keep Everything Greenfield
 
-- Source repo artifacts follow the documented layout: `prompts/`, `skills/<name>/SKILL.md`, `commands/`, optional `rules/`, optional `mcp-servers/<server-id>/server.yaml`, optional `requirements.yaml`, and optional `env.yaml`.
-- Keep artifact identifiers stable unless a rename is explicitly requested.
-- Prompt metadata is optional and only supports fields that current runtime consumes: `slug`, `name`, and `description`.
-- Keep secrets as `op://` references in `env.yaml`; never replace them with plaintext credentials. Use `scope: local` for per-developer secrets.
+- Prefer replacing and deleting superseded code over compatibility shims, aliases, fallback paths, or parallel implementations.
+- Remove stale references (code, tests, fixtures, comments, and docs) in the same change whenever practical.
+- Do not leave dead code behind: remove unused helpers, obsolete branches, stale flags, and commented-out legacy blocks.
+- Keep tests aligned with current behavior and naming; avoid preserving historical behavior unless explicitly required.
+- If backward compatibility is required, keep it explicit, minimal, and time-bounded.
+- When a breaking change is introduced, add a migration script under `migration/scripts/` to update impacted files, settings, and config.
 
-## Safety And Scope
+## Workflow
 
-- Do not manually edit generated or synced client outputs unless the task is specifically about them: `.cursor/*`, `.codex/*`, `.gemini/*`, `.ai-sync/state/`.
-- Prefer minimal diffs and targeted validation over broad refactors.
-- If a task spans multiple subprojects, be explicit about which directory each change belongs to.
+- Run relevant tests for touched areas when possible.
+- Keep docs aligned with behavior and CLI output.
+- Avoid committing secrets, tokens, or machine-local configuration.
+
+## ai-sync Managed Rules
+
+`ai-sync` may append a managed rules index block to this file.
+Do not manually edit content inside managed marker blocks.
 
 <!-- BEGIN ai-sync:rules-index -->
 ## ai-sync Rules (managed)

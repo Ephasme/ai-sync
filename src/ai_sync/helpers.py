@@ -45,12 +45,3 @@ def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def extract_description(content: str) -> str:
-    match = re.search(r"## Task\s+(.*)", content, re.IGNORECASE | re.DOTALL)
-    if match:
-        desc = match.group(1).strip().split("\n")[0]
-        return desc[:150] + "..." if len(desc) > 150 else desc
-    for line in content.splitlines():
-        if line.strip() and not line.startswith("#"):
-            return line.strip()[:100]
-    return "AI Agent"

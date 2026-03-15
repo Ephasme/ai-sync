@@ -46,6 +46,9 @@ node_modules/
 .cursor/*
 .codex/*
 .gemini/*
+.claude/*
+.mcp.json
+CLAUDE.md
 .ai-sync/sources/
 .ai-sync/state/
 .ai-sync/rules/
