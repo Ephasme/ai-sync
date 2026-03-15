@@ -53,6 +53,12 @@ It syncs reusable resources from source repos into local project outputs so team
 
 ## Workflow
 
+- Use `just` commands in first intention for local setup, linting, typechecking, tests, and release preparation instead of calling the underlying tools directly.
+- Run `just install` when setting up the repo or refreshing the local toolchain; it installs dev dependencies and registers the `pre-commit` hook.
+- Before committing, prefer running the relevant `just` checks first: `just lint`, `just typecheck`, and `just test`.
+- Let the installed `pre-commit` hook run on normal `git commit`; do not bypass it unless the user explicitly requests that.
+- Use `just fix` for safe Ruff autofixes before re-running checks.
+- Use `just lock` when updating dependency lock state, and use `just release <version>` for the documented release flow instead of manually reproducing those steps.
 - Run relevant tests for touched areas when possible.
 - Keep docs aligned with behavior and CLI output.
 - Avoid committing secrets, tokens, or machine-local configuration.
@@ -63,6 +69,7 @@ It syncs reusable resources from source repos into local project outputs so team
 Do not manually edit content inside managed marker blocks.
 
 <!-- BEGIN ai-sync:rules-index -->
+
 ## ai-sync Rules (managed)
 
 You MUST read and follow ALL rules listed below:
