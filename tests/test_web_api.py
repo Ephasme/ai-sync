@@ -265,19 +265,16 @@ def test_plan_endpoint_returns_400_for_missing_local_env_used_by_mcp(tmp_path: P
     project_root = app.state.project_root
     source_root = tmp_path / "company-source"
 
-    (source_root / "env.yaml").write_text(
-        "AWS_PROFILE:\n"
-        "  scope: local\n"
-        "  description: AWS profile name\n",
-        encoding="utf-8",
-    )
     (source_root / "mcp-servers" / "context7" / "artifact.yaml").write_text(
         "name: Context7\n"
         "description: Library documentation lookup via Context7.\n"
         "method: stdio\n"
         "command: npx\n"
-        "env:\n"
-        '  AWS_PROFILE: "${AWS_PROFILE}"\n',
+        "dependencies:\n"
+        "  env:\n"
+        "    AWS_PROFILE:\n"
+        "      local: {}\n"
+        "      description: AWS profile name\n",
         encoding="utf-8",
     )
     manifest_path = project_root / ".ai-sync.yaml"

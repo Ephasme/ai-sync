@@ -235,7 +235,6 @@ def apply_plan(
     exit_code = container.apply_service().run_apply(
         project_root=project_root,
         resolved_artifacts=cached_plan_context.resolved_artifacts,
-        runtime_env=cached_plan_context.runtime_env,
         display=display,
     )
     request.app.state.cached_plan_context = None

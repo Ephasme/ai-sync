@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, TextIO
 
 from ai_sync.clients import Client
+from ai_sync.data_classes.effect_spec import EffectSpec
+from ai_sync.data_classes.write_spec import WriteSpec
 from ai_sync.services.config_store_service import ConfigStoreService
 from ai_sync.services.display_service import DisplayService
 from ai_sync.services.git_safety_service import GitSafetyService
@@ -16,8 +18,8 @@ from ai_sync.services.project_locator_service import ProjectLocatorService
 from ai_sync.services.tool_version_service import ToolVersionService
 
 if TYPE_CHECKING:
+    from ai_sync.data_classes.artifact import Artifact
     from ai_sync.data_classes.resolved_artifact_set import ResolvedArtifactSet
-    from ai_sync.data_classes.runtime_env import RuntimeEnv
     from ai_sync.models import ApplyPlan
     from ai_sync.services.plan_service import PlanService
 
@@ -30,7 +32,7 @@ class ApplyService:
         *,
         managed_output_service: ManagedOutputService,
         git_safety_service: GitSafetyService,
-        plan_service: PlanService,
+        plan_service: "PlanService",
         plan_persistence_service: PlanPersistenceService,
         project_locator_service: ProjectLocatorService,
         config_store_service: ConfigStoreService,
@@ -86,7 +88,6 @@ class ApplyService:
         return self.run_apply(
             project_root=project_root,
             resolved_artifacts=plan_context.resolved_artifacts,
-            runtime_env=plan_context.runtime_env,
             display=display,
         )
 
@@ -94,40 +95,96 @@ class ApplyService:
         self,
         *,
         project_root: Path,
-        resolved_artifacts: ResolvedArtifactSet,
-        runtime_env: RuntimeEnv,
+        resolved_artifacts: "ResolvedArtifactSet",
         display: DisplayService,
     ) -> int:
         display.print("")
         display.rule("Starting Apply", style="info")
         secret_file_paths: set[Path] = set()
 
+        write_entries: list[tuple["Artifact", list[WriteSpec]]] = []
+        effect_specs: list[EffectSpec] = []
         for artifact, specs in resolved_artifacts.entries:
+            writes: list[WriteSpec] = [s for s in specs if isinstance(s, WriteSpec)]
+            effects: list[EffectSpec] = [s for s in specs if isinstance(s, EffectSpec)]
+            if writes:
+                write_entries.append((artifact, writes))
+            effect_specs.extend(effects)
             if artifact.secret_backed:
-                for spec in specs:
+                for spec in writes:
                     secret_file_paths.add(spec.file_path)
 
         self._managed_output_service.apply_resolved_artifacts(
             project_root=project_root,
-            entries=resolved_artifacts.entries,
+            entries=write_entries,
             desired_targets=resolved_artifacts.desired_targets,
         )
 
+        all_effects: list[EffectSpec] = []
         for path in secret_file_paths:
-            if path.exists():
-                Client.set_restrictive_permissions(path)
+            all_effects.append(
+                EffectSpec(
+                    effect_type="chmod",
+                    target=str(path),
+                    target_key=f"chmod:{path}",
+                    params={"path": str(path)},
+                )
+            )
+        all_effects.extend(effect_specs)
 
-        has_env = bool(runtime_env.env) or bool(runtime_env.local_vars)
-        if has_env:
-            installed = self._git_safety_service.install_pre_commit_hook(project_root)
-            if installed:
-                display.print("  Installed pre-commit hook guarding .env.ai-sync", style="info")
+        effect_baselines: list[tuple[EffectSpec, dict]] = []
+        for effect in all_effects:
+            baseline = self._capture_effect_baseline(project_root, effect)
+            effect_baselines.append((effect, baseline))
+
+        for effect in all_effects:
+            self._execute_effect(project_root, effect, display)
+
+        if effect_baselines:
+            self._managed_output_service.record_and_save_effects(
+                project_root=project_root,
+                effects=effect_baselines,
+            )
 
         display.print("")
         display.panel("Apply complete", title="Done", style="success")
         return 0
 
-    def confirm_plan_deletions(self, plan: ApplyPlan, display: DisplayService) -> bool:
+    def _capture_effect_baseline(self, project_root: Path, effect: EffectSpec) -> dict:
+        """Snapshot prior state before an effect is executed."""
+        if effect.effect_type in ("pre-commit-hook-install", "pre-commit-hook-remove"):
+            status = self._git_safety_service.check_pre_commit_hook(project_root)
+            return {"had_prior_hook": status == "installed"}
+        if effect.effect_type == "chmod":
+            path = Path(effect.params.get("path", effect.target))
+            try:
+                mode = path.stat().st_mode if path.exists() else None
+            except OSError:
+                mode = None
+            return {"prior_mode": mode}
+        return {}
+
+    def _execute_effect(
+        self, project_root: Path, effect: EffectSpec, display: DisplayService
+    ) -> None:
+        """Execute a single EffectSpec side effect."""
+        if effect.effect_type == "pre-commit-hook-install":
+            installed = self._git_safety_service.install_pre_commit_hook(project_root)
+            if installed:
+                display.print("  Installed pre-commit hook guarding .env.ai-sync", style="info")
+        elif effect.effect_type == "pre-commit-hook-remove":
+            removed = self._git_safety_service.remove_pre_commit_hook(project_root)
+            if removed:
+                display.print(
+                    "  Removed ai-sync pre-commit hook (no local env dependencies selected)",
+                    style="info",
+                )
+        elif effect.effect_type == "chmod":
+            path = Path(effect.params.get("path", effect.target))
+            if path.exists():
+                Client.set_restrictive_permissions(path)
+
+    def confirm_plan_deletions(self, plan: "ApplyPlan", display: DisplayService) -> bool:
         delete_actions = [action for action in plan.actions if action.action == "delete"]
         if not delete_actions:
             return True

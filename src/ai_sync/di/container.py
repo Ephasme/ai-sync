@@ -15,6 +15,7 @@ from ai_sync.clients import ClientFactory
 from ai_sync.services.agent_artifact_service import AgentArtifactService
 from ai_sync.services.apply_service import ApplyService
 from ai_sync.services.artifact_bundle_service import ArtifactBundleService
+from ai_sync.services.artifact_preparation_service import ArtifactPreparationService
 from ai_sync.services.artifact_service import ArtifactService
 from ai_sync.services.command_artifact_service import CommandArtifactService
 from ai_sync.services.config_store_service import ConfigStoreService
@@ -26,7 +27,7 @@ from ai_sync.services.git_source_fetcher_service import GitSourceFetcherService
 from ai_sync.services.install_service import InstallService
 from ai_sync.services.managed_output_service import ManagedOutputService
 from ai_sync.services.mcp_artifact_service import McpArtifactService
-from ai_sync.services.mcp_server_service import McpServerService
+from ai_sync.services.mcp_preparation_service import McpPreparationService
 from ai_sync.services.one_password_auth_service import OnePasswordAuthService
 from ai_sync.services.one_password_cli_service import OnePasswordCliService
 from ai_sync.services.one_password_sdk_service import OnePasswordSdkService
@@ -95,7 +96,7 @@ class AppContainer(containers.DeclarativeContainer):
     git_safety_service = providers.Singleton(GitSafetyService)
     project_locator_service = providers.Singleton(ProjectLocatorService)
     project_manifest_service = providers.Singleton(ProjectManifestService)
-    mcp_server_service = providers.Singleton(McpServerService)
+    mcp_preparation_service = providers.Singleton(McpPreparationService)
     tool_version_service = providers.Singleton(ToolVersionService)
     tool_requirement_service = providers.Singleton(
         ToolRequirementService,
@@ -158,13 +159,19 @@ class AppContainer(containers.DeclarativeContainer):
 
     error_handler_service = providers.Singleton(ErrorHandlerService)
 
+    artifact_preparation_service = providers.Singleton(
+        ArtifactPreparationService,
+        mcp_preparation_service=mcp_preparation_service,
+        artifact_bundle_service=artifact_bundle_service,
+        environment_service=environment_service,
+    )
+
     plan_service = providers.Singleton(
         PlanService,
         source_resolver_service=source_resolver_service,
-        environment_service=environment_service,
+        artifact_preparation_service=artifact_preparation_service,
         project_locator_service=project_locator_service,
         project_manifest_service=project_manifest_service,
-        mcp_server_service=mcp_server_service,
         tool_requirement_service=tool_requirement_service,
         plan_builder_service=plan_builder_service,
         plan_persistence_service=plan_persistence_service,

@@ -100,21 +100,28 @@ class DoctorService:
         else:
             display.print("  Gitignore: OK", style="success")
 
-        hook_status = self._git_safety_service.check_pre_commit_hook(project_root)
-        if hook_status == "installed":
-            display.print("  Pre-commit hook: OK", style="success")
-        elif hook_status == "missing":
-            display.print(
-                "  Pre-commit hook: not installed (run `ai-sync apply` to install)",
-                style="warning",
-            )
-        else:
-            display.print("  Pre-commit hook: skipped (not a git repo)", style="dim")
-
         try:
             context = self._plan_service.assemble_plan_context(
                 project_root, config_root, display
             )
+            hook_status = self._git_safety_service.check_pre_commit_hook(project_root)
+            requires_local_hook = bool(context.runtime_env.local_vars)
+            if hook_status == "not-git-repo":
+                display.print("  Pre-commit hook: skipped (not a git repo)", style="dim")
+            elif requires_local_hook and hook_status == "installed":
+                display.print("  Pre-commit hook: OK", style="success")
+            elif requires_local_hook and hook_status == "missing":
+                display.print(
+                    "  Pre-commit hook: not installed (run `ai-sync apply` to install)",
+                    style="warning",
+                )
+            elif not requires_local_hook and hook_status == "installed":
+                display.print(
+                    "  Pre-commit hook: installed but not needed for current selections",
+                    style="dim",
+                )
+            else:
+                display.print("  Pre-commit hook: not needed for current selections", style="dim")
             display.print(
                 f"  Planned: {len(context.plan.actions)} action(s) "
                 f"from {len(context.resolved_sources)} source(s)",

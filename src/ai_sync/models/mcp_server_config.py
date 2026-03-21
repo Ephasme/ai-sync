@@ -1,14 +1,18 @@
-"""MCP server configuration model."""
+"""MCP server config model."""
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, StrictFloat, StrictInt, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, field_validator, model_validator
 
-from ai_sync.models.client_override_config import ClientOverrideConfig
+from ai_sync.models.mcp_client_override_config import McpClientOverrideConfig
 from ai_sync.models.oauth_config import OAuthConfig
 
 
-class ServerConfig(BaseModel):
+class McpServerConfig(BaseModel):
+    """MCP server configuration parsed from a source artifact."""
+
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     method: Literal["stdio", "http", "sse"] = "stdio"
     command: str | None = None
@@ -17,12 +21,11 @@ class ServerConfig(BaseModel):
     description: str
     trust: bool | None = None
     timeout_seconds: StrictInt | StrictFloat | None = None
-    env: dict[str, str] = Field(default_factory=dict)
     auth: dict[str, str] = Field(default_factory=dict)
     oauth: OAuthConfig = Field(default_factory=OAuthConfig)
     headers: dict[str, str] = Field(default_factory=dict)
     auth_provider_type: str | None = None
-    client_overrides: dict[str, ClientOverrideConfig] = Field(default_factory=dict)
+    client_overrides: dict[str, McpClientOverrideConfig] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod

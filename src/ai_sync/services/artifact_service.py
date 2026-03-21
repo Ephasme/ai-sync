@@ -12,6 +12,7 @@ from ai_sync.services.artifact_collector_service import ArtifactCollectorService
 
 if TYPE_CHECKING:
     from ai_sync.clients.base import Client
+    from ai_sync.data_classes.prepared_artifacts import PreparedArtifacts
     from ai_sync.data_classes.resolved_source import ResolvedSource
     from ai_sync.data_classes.runtime_env import RuntimeEnv
     from ai_sync.models import ProjectManifest
@@ -44,7 +45,7 @@ class ArtifactService:
         manifest: "ProjectManifest",
         resolved_sources: dict[str, "ResolvedSource"],
         runtime_env: "RuntimeEnv",
-        mcp_manifest: dict,
+        prepared_artifacts: "PreparedArtifacts",
         clients: list["Client"],
     ) -> list[Artifact]:
         return [
@@ -53,7 +54,7 @@ class ArtifactService:
                 manifest=manifest,
                 resolved_sources=resolved_sources,
                 runtime_env=runtime_env,
-                mcp_manifest=mcp_manifest,
+                prepared_artifacts=prepared_artifacts,
                 clients=clients,
             ),
             *self._command_artifact_service.collect_artifacts(
@@ -61,7 +62,7 @@ class ArtifactService:
                 manifest=manifest,
                 resolved_sources=resolved_sources,
                 runtime_env=runtime_env,
-                mcp_manifest=mcp_manifest,
+                prepared_artifacts=prepared_artifacts,
                 clients=clients,
             ),
             *self._skill_artifact_service.collect_artifacts(
@@ -69,7 +70,7 @@ class ArtifactService:
                 manifest=manifest,
                 resolved_sources=resolved_sources,
                 runtime_env=runtime_env,
-                mcp_manifest=mcp_manifest,
+                prepared_artifacts=prepared_artifacts,
                 clients=clients,
             ),
             *self._rule_artifact_service.collect_artifacts(
@@ -77,7 +78,7 @@ class ArtifactService:
                 manifest=manifest,
                 resolved_sources=resolved_sources,
                 runtime_env=runtime_env,
-                mcp_manifest=mcp_manifest,
+                prepared_artifacts=prepared_artifacts,
                 clients=clients,
             ),
             *self._rule_index_artifacts(manifest=manifest, project_root=project_root),
@@ -86,7 +87,7 @@ class ArtifactService:
                 manifest=manifest,
                 resolved_sources=resolved_sources,
                 runtime_env=runtime_env,
-                mcp_manifest=mcp_manifest,
+                prepared_artifacts=prepared_artifacts,
                 clients=clients,
             ),
             *self._project_artifact_service.collect_artifacts(
@@ -94,7 +95,7 @@ class ArtifactService:
                 manifest=manifest,
                 resolved_sources=resolved_sources,
                 runtime_env=runtime_env,
-                mcp_manifest=mcp_manifest,
+                prepared_artifacts=prepared_artifacts,
                 clients=clients,
             ),
         ]

@@ -14,6 +14,7 @@ from ai_sync.services.artifact_bundle_service import ArtifactBundleService
 
 if TYPE_CHECKING:
     from ai_sync.clients.base import Client
+    from ai_sync.data_classes.prepared_artifacts import PreparedArtifacts
     from ai_sync.data_classes.resolved_source import ResolvedSource
     from ai_sync.data_classes.runtime_env import RuntimeEnv
     from ai_sync.models import ProjectManifest
@@ -46,10 +47,10 @@ class RuleArtifactService:
         manifest: "ProjectManifest",
         resolved_sources: dict[str, "ResolvedSource"],
         runtime_env: "RuntimeEnv",
-        mcp_manifest: dict,
+        prepared_artifacts: "PreparedArtifacts",
         clients: list["Client"],
     ) -> list[Artifact]:
-        del runtime_env, mcp_manifest
+        del runtime_env, prepared_artifacts
 
         artifacts: list[Artifact] = []
         rules_dir = project_root / ".ai-sync" / "rules"
@@ -106,9 +107,13 @@ class RuleArtifactService:
                     description=artifact_description,
                     source_alias=alias,
                     plan_key=str(target),
-                    secret_backed=False,
+                    secret_backed=any(
+                        dep.mode == "secret"
+                        for dep in bundle.env_dependencies.values()
+                    ),
                     client="global",
                     resolve_fn=make_global_resolve(),
+                    env_dependencies=bundle.env_dependencies,
                 )
             )
 
@@ -144,9 +149,13 @@ class RuleArtifactService:
                         description=artifact_description,
                         source_alias=alias,
                         plan_key=str(client_target),
-                        secret_backed=False,
+                        secret_backed=any(
+                            dep.mode == "secret"
+                            for dep in bundle.env_dependencies.values()
+                        ),
                         client=client.name,
                         resolve_fn=make_client_resolve(),
+                        env_dependencies=bundle.env_dependencies,
                     )
                 )
 

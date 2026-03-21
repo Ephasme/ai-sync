@@ -17,8 +17,10 @@ It syncs reusable resources from source repos into local project outputs so team
 - **Manifest**: `.ai-sync.yaml` (or `.ai-sync.local.yaml`) that declares sources and selected resources.
 - **Scoped reference**: `<sourceAlias>/<resourceId>` identifier used to select a resource from a source.
 - **Artifacts**: normalized internal representation of selected resources before writing files.
-- **Plan**: computed action set (writes/deletes/updates) generated from current manifest + sources.
-- **Apply**: execution step that performs the planned writes in the project.
+- **Prepared artifacts**: shared boundary (`PreparedArtifacts`) produced by the preparation pipeline, carrying per-kind payloads for downstream collectors and plan builders.
+- **Plan**: computed action set (writes/deletes/updates/effects) generated from current manifest + sources.
+- **Apply**: execution step that performs the planned writes and effects in the project.
+- **ApplySpec**: common contract for all managed operations — `WriteSpec` for file writes, `EffectSpec` for side effects (hook install, permission changes).
 - **Managed outputs**: files/directories owned or partially managed by `ai-sync` (for example `.codex/`, `.cursor/`, `.gemini/`, `.claude/`, `.ai-sync/*`, and selected managed blocks in markdown files).
 
 ## Python Coding Best Practices (Consensus)
@@ -60,8 +62,6 @@ It syncs reusable resources from source repos into local project outputs so team
 - Remove stale references (code, tests, fixtures, comments, and docs) in the same change whenever practical.
 - Do not leave dead code behind: remove unused helpers, obsolete branches, stale flags, and commented-out legacy blocks.
 - Keep tests aligned with current behavior and naming; avoid preserving historical behavior unless explicitly required.
-- If backward compatibility is required, keep it explicit, minimal, and time-bounded.
-- When a breaking change is introduced, add a migration script under `migration/scripts/` to update impacted files, settings, and config.
 
 ## Workflow
 

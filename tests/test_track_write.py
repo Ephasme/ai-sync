@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ai_sync.adapters.state_store import StateStore
+import pytest
+
+from ai_sync.adapters.state_store import IncompatibleStateError, StateStore
+from ai_sync.helpers import ensure_dir
 from ai_sync.data_classes.write_spec import WriteSpec
 from ai_sync.di import create_container
+from ai_sync.services.managed_output_service import ManagedOutputService
 
 
 def _track_write(specs: list[WriteSpec], store: StateStore) -> None:
@@ -94,3 +98,84 @@ def test_track_write_agent_markdown_uses_full_file(tmp_path: Path, monkeypatch) 
     content = target.read_text(encoding="utf-8")
     assert content.startswith("---\nname: test-agent")
     assert "BEGIN ai-sync:agent:test-agent" not in content
+
+
+def test_state_version_2_in_persisted_state(tmp_path: Path) -> None:
+    store = StateStore(tmp_path)
+    store.load()
+    store.save()
+    raw = (tmp_path / ".ai-sync" / "state" / "state.json").read_text(encoding="utf-8")
+    data = json.loads(raw)
+    assert data["version"] == 2
+    assert "effects" in data
+    assert isinstance(data["effects"], list)
+
+
+def test_incompatible_state_version_raises_error(tmp_path: Path) -> None:
+    state_dir = tmp_path / ".ai-sync" / "state"
+    ensure_dir(state_dir)
+    (state_dir / "state.json").write_text(
+        json.dumps({"version": 1, "entries": []}),
+        encoding="utf-8",
+    )
+    store = StateStore(tmp_path)
+    store.load()
+    with pytest.raises(IncompatibleStateError) as exc_info:
+        store.check_version()
+    assert "uninstall" in str(exc_info.value).lower()
+
+
+def test_record_effect_persists_baseline(tmp_path: Path) -> None:
+    store = StateStore(tmp_path)
+    store.load()
+    store.record_effect(
+        effect_type="chmod",
+        target="/foo/bar",
+        target_key="chmod:/foo/bar",
+        baseline={"prior_mode": 33188},
+    )
+    store.save()
+
+    store2 = StateStore(tmp_path)
+    store2.load()
+    effects = store2.list_effects()
+    assert len(effects) == 1
+    assert effects[0] == {
+        "effect_type": "chmod",
+        "target": "/foo/bar",
+        "target_key": "chmod:/foo/bar",
+        "baseline": {"prior_mode": 33188},
+    }
+    assert store2.get_effect("chmod", "chmod:/foo/bar") is not None
+
+
+def test_record_effect_idempotent(tmp_path: Path) -> None:
+    store = StateStore(tmp_path)
+    store.load()
+    store.record_effect(
+        effect_type="chmod",
+        target="/foo/bar",
+        target_key="chmod:/foo/bar",
+        baseline={"prior_mode": 33188},
+    )
+    store.record_effect(
+        effect_type="chmod",
+        target="/foo/bar",
+        target_key="chmod:/foo/bar",
+        baseline={"prior_mode": 99999},
+    )
+    effects = store.list_effects()
+    assert len(effects) == 1
+    assert effects[0]["baseline"]["prior_mode"] == 33188
+
+
+def test_managed_output_service_rejects_incompatible_state(tmp_path: Path) -> None:
+    state_dir = tmp_path / ".ai-sync" / "state"
+    ensure_dir(state_dir)
+    (state_dir / "state.json").write_text(
+        json.dumps({"version": 1, "entries": []}),
+        encoding="utf-8",
+    )
+    svc = ManagedOutputService()
+    with pytest.raises(IncompatibleStateError):
+        svc.classify_plan_key_specs(project_root=tmp_path, specs=[])

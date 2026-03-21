@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from ai_sync.data_classes.effect_spec import EffectSpec
+from ai_sync.data_classes.write_spec import WriteSpec
 from ai_sync.di import create_container
 from ai_sync.services.plan_persistence_service import PlanPersistenceService
 from ai_sync.services.plain_display_service import PlainDisplayService
@@ -48,10 +50,15 @@ def _write_project(tmp_path: Path) -> tuple[Path, Path]:
         encoding="utf-8",
     )
     (source_root / "rules" / "commit" / "prompt.md").write_text("Commit rules\n", encoding="utf-8")
-    (source_root / "env.yaml").write_text("TOKEN:\n  value: abc\n", encoding="utf-8")
     (source_root / "mcp-servers" / "context7").mkdir(parents=True)
     (source_root / "mcp-servers" / "context7" / "artifact.yaml").write_text(
-        'name: Context7\ndescription: Library documentation lookup via Context7.\nmethod: stdio\ncommand: npx\nenv:\n  TOKEN: "$TOKEN"\n',
+        "name: Context7\n"
+        "description: Library documentation lookup via Context7.\n"
+        "method: stdio\n"
+        "command: npx\n"
+        "dependencies:\n"
+        "  env:\n"
+        "    TOKEN: abc\n",
         encoding="utf-8",
     )
 
@@ -90,7 +97,6 @@ def _run_apply_from_context(context, project_root, display):
     return container.apply_service().run_apply(
         project_root=project_root,
         resolved_artifacts=context.resolved_artifacts,
-        runtime_env=context.runtime_env,
         display=display,
     )
 
@@ -100,12 +106,50 @@ def _build_plan_context(project_root: Path, config_root: Path, display: PlainDis
     return container.plan_service().assemble_plan_context(project_root, config_root, display)
 
 
-def test_build_plan_context_marks_secret_backed_outputs(tmp_path: Path) -> None:
+def test_build_plan_context_does_not_mark_literal_only_mcp_env_secret_backed(tmp_path: Path) -> None:
     config_root, project_root = _write_project(tmp_path)
     display = PlainDisplayService()
     context = _build_plan_context(project_root, config_root, display)
     secret_targets = {action.target for action in context.plan.actions if action.secret_backed}
-    assert str(project_root / ".env.ai-sync") in secret_targets
+    assert str(project_root / ".env.ai-sync") not in secret_targets
+    assert str(project_root / ".cursor" / "mcp.json") not in secret_targets
+
+
+def test_build_plan_context_strips_dependency_metadata_from_rendered_mcp_outputs(
+    tmp_path: Path,
+) -> None:
+    config_root, project_root = _write_project(tmp_path)
+    display = PlainDisplayService()
+    context = _build_plan_context(project_root, config_root, display)
+    mcp_entries = [
+        (artifact, specs)
+        for artifact, specs in context.resolved_artifacts.entries
+        if artifact.kind == "mcp-server"
+    ]
+    assert mcp_entries
+    for _artifact, specs in mcp_entries:
+        for spec in specs:
+            assert isinstance(spec, WriteSpec)
+            assert "dependencies" not in str(spec.value)
+
+
+def test_build_plan_context_synthesizes_mcp_env_from_dependencies(tmp_path: Path) -> None:
+    config_root, project_root = _write_project(tmp_path)
+    display = PlainDisplayService()
+    context = _build_plan_context(project_root, config_root, display)
+
+    mcp_entries = [
+        (artifact, specs)
+        for artifact, specs in context.resolved_artifacts.entries
+        if artifact.kind == "mcp-server"
+    ]
+    assert mcp_entries
+    for artifact, specs in mcp_entries:
+        assert artifact.env_dependencies["TOKEN"].literal == "abc"
+        for spec in specs:
+            assert isinstance(spec, WriteSpec)
+            assert isinstance(spec.value, dict)
+            assert spec.value["env"] == {"TOKEN": "abc"}
 
 
 def test_build_plan_context_includes_artifact_names_and_descriptions(tmp_path: Path) -> None:
@@ -295,8 +339,17 @@ def test_saved_plan_invalidates_when_prompt_file_changes(tmp_path: Path) -> None
 def test_local_var_preserved_from_existing_env(tmp_path: Path) -> None:
     config_root, project_root = _write_project(tmp_path)
     source_root = tmp_path / "company-source"
-    (source_root / "env.yaml").write_text(
-        "TOKEN:\n  value: abc\nMY_PAT:\n  scope: local\n  description: personal token\n",
+    (source_root / "mcp-servers" / "context7" / "artifact.yaml").write_text(
+        "name: Context7\n"
+        "description: Library documentation lookup via Context7.\n"
+        "method: stdio\n"
+        "command: npx\n"
+        "dependencies:\n"
+        "  env:\n"
+        "    TOKEN: abc\n"
+        "    MY_PAT:\n"
+        "      local: {}\n"
+        "      description: personal token\n",
         encoding="utf-8",
     )
 
@@ -312,8 +365,16 @@ def test_local_var_preserved_from_existing_env(tmp_path: Path) -> None:
 def test_unfilled_local_var_referenced_by_mcp_raises(tmp_path: Path) -> None:
     config_root, project_root = _write_project(tmp_path)
     source_root = tmp_path / "company-source"
-    (source_root / "env.yaml").write_text(
-        "TOKEN:\n  scope: local\n  description: personal token\n",
+    (source_root / "mcp-servers" / "context7" / "artifact.yaml").write_text(
+        "name: Context7\n"
+        "description: Library documentation lookup via Context7.\n"
+        "method: stdio\n"
+        "command: npx\n"
+        "dependencies:\n"
+        "  env:\n"
+        "    TOKEN:\n"
+        "      local: {}\n"
+        "      description: personal token\n",
         encoding="utf-8",
     )
 
@@ -325,8 +386,13 @@ def test_unfilled_local_var_referenced_by_mcp_raises(tmp_path: Path) -> None:
 def test_unfilled_local_var_not_referenced_by_mcp_succeeds(tmp_path: Path) -> None:
     config_root, project_root = _write_project(tmp_path)
     source_root = tmp_path / "company-source"
-    (source_root / "env.yaml").write_text(
-        "TOKEN:\n  value: abc\nOPTIONAL_PAT:\n  scope: local\n",
+    (source_root / "commands" / "session-summary" / "artifact.yaml").write_text(
+        "name: Session summary\n"
+        "description: Session summary command\n"
+        "dependencies:\n"
+        "  env:\n"
+        "    OPTIONAL_PAT:\n"
+        "      local: {}\n",
         encoding="utf-8",
     )
 
@@ -389,3 +455,166 @@ def test_build_plan_no_collision_with_alias_prefixed_commands(tmp_path: Path) ->
     context = _build_plan_context(project_root, config_root, display)
     command_actions = [a for a in context.plan.actions if a.kind == "command"]
     assert len(command_actions) >= 2
+
+
+def test_identical_duplicate_env_dependencies_merge_successfully(tmp_path: Path) -> None:
+    config_root = tmp_path / "config"
+    config_root.mkdir()
+    (config_root / "config.toml").write_text('op_account_identifier = "x.1password.com"\n', encoding="utf-8")
+
+    company = tmp_path / "company"
+    (company / "commands" / "shared").mkdir(parents=True)
+    (company / "commands" / "shared" / "artifact.yaml").write_text(
+        "name: Shared\n"
+        "description: Shared command\n"
+        "dependencies:\n"
+        "  env:\n"
+        "    API_REGION: eu-west-3\n",
+        encoding="utf-8",
+    )
+    (company / "commands" / "shared" / "prompt.md").write_text("Company\n", encoding="utf-8")
+
+    frontend = tmp_path / "frontend"
+    (frontend / "commands" / "shared").mkdir(parents=True)
+    (frontend / "commands" / "shared" / "artifact.yaml").write_text(
+        "name: Shared\n"
+        "description: Shared command\n"
+        "dependencies:\n"
+        "  env:\n"
+        "    API_REGION: eu-west-3\n",
+        encoding="utf-8",
+    )
+    (frontend / "commands" / "shared" / "prompt.md").write_text("Frontend\n", encoding="utf-8")
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / ".gitignore").write_text(
+        ".cursor/\n.codex/\n.gemini/\n.claude/\n.mcp.json\nCLAUDE.md\n.ai-sync/\n.env.ai-sync\n",
+        encoding="utf-8",
+    )
+    (project_root / ".ai-sync.yaml").write_text(
+        "\n".join(
+            [
+                "sources:",
+                "  company:",
+                f"    source: {company}",
+                "  frontend:",
+                f"    source: {frontend}",
+                "commands:",
+                "  - company/shared",
+                "  - frontend/shared",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    display = PlainDisplayService()
+    context = _build_plan_context(project_root, config_root, display)
+    assert context.runtime_env.env["API_REGION"] == "eu-west-3"
+
+
+def test_conflicting_duplicate_env_dependencies_still_fail(tmp_path: Path) -> None:
+    config_root = tmp_path / "config"
+    config_root.mkdir()
+    (config_root / "config.toml").write_text('op_account_identifier = "x.1password.com"\n', encoding="utf-8")
+
+    company = tmp_path / "company"
+    (company / "commands" / "shared").mkdir(parents=True)
+    (company / "commands" / "shared" / "artifact.yaml").write_text(
+        "name: Shared\n"
+        "description: Shared command\n"
+        "dependencies:\n"
+        "  env:\n"
+        "    API_REGION: eu-west-3\n",
+        encoding="utf-8",
+    )
+    (company / "commands" / "shared" / "prompt.md").write_text("Company\n", encoding="utf-8")
+
+    frontend = tmp_path / "frontend"
+    (frontend / "commands" / "shared").mkdir(parents=True)
+    (frontend / "commands" / "shared" / "artifact.yaml").write_text(
+        "name: Shared\n"
+        "description: Shared command\n"
+        "dependencies:\n"
+        "  env:\n"
+        "    API_REGION: us-east-1\n",
+        encoding="utf-8",
+    )
+    (frontend / "commands" / "shared" / "prompt.md").write_text("Frontend\n", encoding="utf-8")
+
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / ".gitignore").write_text(
+        ".cursor/\n.codex/\n.gemini/\n.claude/\n.mcp.json\nCLAUDE.md\n.ai-sync/\n.env.ai-sync\n",
+        encoding="utf-8",
+    )
+    (project_root / ".ai-sync.yaml").write_text(
+        "\n".join(
+            [
+                "sources:",
+                "  company:",
+                f"    source: {company}",
+                "  frontend:",
+                f"    source: {frontend}",
+                "commands:",
+                "  - company/shared",
+                "  - frontend/shared",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    display = PlainDisplayService()
+    with pytest.raises(RuntimeError, match="Conflicting env dependency declarations"):
+        _build_plan_context(project_root, config_root, display)
+
+
+def test_plan_classify_effect_pre_commit_hook_install_when_missing(tmp_path: Path) -> None:
+    container = create_container()
+    svc = container.plan_builder_service()
+    effect = EffectSpec(
+        effect_type="pre-commit-hook-install",
+        target=".git/hooks/pre-commit",
+        target_key="git-safety:pre-commit-hook",
+    )
+    assert svc._classify_effect(tmp_path, effect) == "create"
+
+
+def test_plan_classify_effect_pre_commit_hook_remove_when_missing(tmp_path: Path) -> None:
+    container = create_container()
+    svc = container.plan_builder_service()
+    effect = EffectSpec(
+        effect_type="pre-commit-hook-remove",
+        target=".git/hooks/pre-commit",
+        target_key="git-safety:pre-commit-hook",
+    )
+    assert svc._classify_effect(tmp_path, effect) == "unchanged"
+
+
+def test_plan_classify_effect_chmod_when_file_exists(tmp_path: Path) -> None:
+    file = tmp_path / "test.json"
+    file.write_text("{}", encoding="utf-8")
+    container = create_container()
+    svc = container.plan_builder_service()
+    effect = EffectSpec(
+        effect_type="chmod",
+        target=str(file),
+        target_key=f"chmod:{file}",
+        params={"path": str(file)},
+    )
+    assert svc._classify_effect(tmp_path, effect) == "update"
+
+
+def test_plan_classify_effect_chmod_when_file_missing(tmp_path: Path) -> None:
+    file = tmp_path / "test.json"
+    container = create_container()
+    svc = container.plan_builder_service()
+    effect = EffectSpec(
+        effect_type="chmod",
+        target=str(file),
+        target_key=f"chmod:{file}",
+        params={"path": str(file)},
+    )
+    assert svc._classify_effect(tmp_path, effect) == "unchanged"

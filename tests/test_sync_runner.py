@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import cast
 
 from ai_sync.clients.base import Client
+from ai_sync.data_classes.prepared_artifacts import PreparedArtifacts
+from ai_sync.data_classes.prepared_mcp_server import PreparedMcpServer
 from ai_sync.data_classes.resolved_artifact_set import ResolvedArtifactSet
 from ai_sync.data_classes.resolved_source import ResolvedSource
 from ai_sync.data_classes.runtime_env import RuntimeEnv
@@ -98,7 +100,6 @@ def _make_repo_root(tmp_path: Path) -> Path:
     (root / "skills" / "skill-one" / "files").mkdir(parents=True)
     (root / "commands" / "shortcut").mkdir(parents=True)
     (root / "rules" / "commit").mkdir(parents=True)
-    (root / "env.yaml").write_text("TOKEN:\n  value: abc\n", encoding="utf-8")
     (root / "prompts" / "agent" / "artifact.yaml").write_text(
         "slug: agent\n"
         "name: Agent\n"
@@ -129,7 +130,13 @@ def _make_repo_root(tmp_path: Path) -> Path:
     (root / "rules" / "commit" / "prompt.md").write_text("Commit rules\n", encoding="utf-8")
     (root / "mcp-servers" / "srv").mkdir(parents=True)
     (root / "mcp-servers" / "srv" / "artifact.yaml").write_text(
-        'name: Example MCP\ndescription: Example MCP server for test coverage.\nmethod: stdio\ncommand: npx\nenv:\n  TOKEN: "$TOKEN"\n',
+        "name: Example MCP\n"
+        "description: Example MCP server for test coverage.\n"
+        "method: stdio\n"
+        "command: npx\n"
+        "dependencies:\n"
+        "  env:\n"
+        "    TOKEN: abc\n",
         encoding="utf-8",
     )
     return root
@@ -140,7 +147,6 @@ def _run_apply(*, project_root: Path, resolved_artifacts, display) -> int:
     return container.apply_service().run_apply(
         project_root=project_root,
         resolved_artifacts=resolved_artifacts,
-        runtime_env=RuntimeEnv(),
         display=display,
     )
 
@@ -151,7 +157,7 @@ def _resolve_artifacts(
     manifest: ProjectManifest,
     resolved_sources: dict[str, ResolvedSource],
     runtime_env: RuntimeEnv,
-    mcp_manifest: dict,
+    prepared_artifacts: PreparedArtifacts,
     clients,
 ):
     artifacts = create_container().artifact_service().collect_artifacts(
@@ -159,7 +165,7 @@ def _resolve_artifacts(
         manifest=manifest,
         resolved_sources=resolved_sources,
         runtime_env=runtime_env,
-        mcp_manifest=mcp_manifest,
+        prepared_artifacts=prepared_artifacts,
         clients=clients,
     )
     entries = []
@@ -168,7 +174,8 @@ def _resolve_artifacts(
         specs = artifact.resolve()
         entries.append((artifact, specs))
         for spec in specs:
-            desired_targets.add((str(spec.file_path), spec.format, spec.target))
+            if isinstance(spec, WriteSpec):
+                desired_targets.add((str(spec.file_path), spec.format, spec.target))
     return ResolvedArtifactSet(entries=entries, desired_targets=desired_targets)
 
 
@@ -195,14 +202,30 @@ def test_run_apply_syncs_agents_and_mcp(tmp_path: Path) -> None:
         mcp_servers=["company/srv"],
         settings={},
     )
-    mcp_manifest = {"srv": {"method": "stdio", "command": "npx", "env": {"TOKEN": "abc"}}}
+    prepared = PreparedArtifacts(
+        mcp_servers=[
+            PreparedMcpServer(
+                scoped_ref="company/srv",
+                source_alias="company",
+                server_id="srv",
+                source_config={},
+                runtime_config={
+                    "method": "stdio",
+                    "command": "npx",
+                    "name": "Example MCP",
+                    "description": "Example MCP server for test coverage.",
+                    "env": {"TOKEN": "abc"},
+                },
+            )
+        ]
+    )
 
     resolved = _resolve_artifacts(
         project_root=project_root,
         manifest=manifest,
         resolved_sources=resolved_sources,
         runtime_env=RuntimeEnv(),
-        mcp_manifest=mcp_manifest,
+        prepared_artifacts=prepared,
         clients=dummy_clients,
     )
     result = _run_apply(project_root=project_root, resolved_artifacts=resolved, display=display)
@@ -237,7 +260,7 @@ def test_run_apply_writes_rules_and_index(tmp_path: Path) -> None:
         manifest=manifest,
         resolved_sources=resolved_sources,
         runtime_env=RuntimeEnv(),
-        mcp_manifest={},
+        prepared_artifacts=PreparedArtifacts(),
         clients=dummy_clients,
     )
     result = _run_apply(project_root=project_root, resolved_artifacts=resolved, display=display)
@@ -273,7 +296,7 @@ def test_run_apply_removes_stale_rules(tmp_path: Path) -> None:
         manifest=manifest_with,
         resolved_sources=resolved_sources,
         runtime_env=RuntimeEnv(),
-        mcp_manifest={},
+        prepared_artifacts=PreparedArtifacts(),
         clients=dummy_clients,
     )
     _run_apply(project_root=project_root, resolved_artifacts=resolved_with, display=display)
@@ -286,7 +309,7 @@ def test_run_apply_removes_stale_rules(tmp_path: Path) -> None:
         manifest=manifest_empty,
         resolved_sources=resolved_sources,
         runtime_env=RuntimeEnv(),
-        mcp_manifest={},
+        prepared_artifacts=PreparedArtifacts(),
         clients=dummy_clients,
     )
     _run_apply(project_root=project_root, resolved_artifacts=resolved_empty, display=display)
@@ -334,7 +357,7 @@ def test_skill_artifacts_include_all_files(tmp_path: Path) -> None:
         manifest=manifest,
         resolved_sources=resolved_sources,
         runtime_env=RuntimeEnv(),
-        mcp_manifest={},
+        prepared_artifacts=PreparedArtifacts(),
         clients=[client],
     )
     assert len(artifacts) == 1
@@ -342,15 +365,16 @@ def test_skill_artifacts_include_all_files(tmp_path: Path) -> None:
     assert artifacts[0].description == "Example skill"
 
     specs = artifacts[0].resolve()
+    write_specs = [s for s in specs if isinstance(s, WriteSpec)]
     rel_paths = {
         s.file_path.relative_to(project_root / ".codex" / "skills" / "company-skill-one").as_posix()
-        for s in specs
+        for s in write_specs
     }
     assert "SKILL.md" in rel_paths
     assert "reference.md" in rel_paths
     assert "files/reference.md" not in rel_paths
 
-    skill_spec = next(spec for spec in specs if spec.file_path.name == "SKILL.md")
+    skill_spec = next(spec for spec in write_specs if spec.file_path.name == "SKILL.md")
     skill_value = cast(str, skill_spec.value)
     assert skill_value.startswith(
         "---\n"
@@ -389,7 +413,7 @@ def test_command_artifacts_produce_write_specs(tmp_path: Path) -> None:
         manifest=manifest,
         resolved_sources=resolved_sources,
         runtime_env=RuntimeEnv(),
-        mcp_manifest={},
+        prepared_artifacts=PreparedArtifacts(),
         clients=[client],
     )
     assert len(artifacts) == 1
@@ -399,6 +423,7 @@ def test_command_artifacts_produce_write_specs(tmp_path: Path) -> None:
 
     specs = artifacts[0].resolve()
     assert len(specs) == 1
+    assert isinstance(specs[0], WriteSpec)
     assert specs[0].value == "Do a thing\n"
     assert "review/company-shortcut.md" in str(specs[0].file_path)
 
@@ -431,7 +456,7 @@ def test_agent_artifacts_use_scoped_alias(tmp_path: Path) -> None:
         manifest=manifest,
         resolved_sources=resolved_sources,
         runtime_env=RuntimeEnv(),
-        mcp_manifest={},
+        prepared_artifacts=PreparedArtifacts(),
         clients=[client],
     )
     assert len(artifacts) == 1
@@ -439,5 +464,6 @@ def test_agent_artifacts_use_scoped_alias(tmp_path: Path) -> None:
     assert artifacts[0].description == "Agent from repo A"
 
     specs = artifacts[0].resolve()
+    assert isinstance(specs[0], WriteSpec)
     assert specs[0].value == "## From A\n"
     assert "company-agent" in str(specs[0].file_path)

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ai_sync.clients.base import Client
+from ai_sync.data_classes.prepared_artifacts import PreparedArtifacts
 from ai_sync.data_classes.runtime_env import RuntimeEnv
 from ai_sync.data_classes.write_spec import WriteSpec
 from ai_sync.models import ProjectManifest
@@ -72,7 +73,7 @@ def test_project_artifact_service_collects_client_settings(tmp_path: Path) -> No
         manifest=ProjectManifest(sources={}, settings={"theme": "dark"}),
         resolved_sources={},
         runtime_env=RuntimeEnv(),
-        mcp_manifest={},
+        prepared_artifacts=PreparedArtifacts(),
         clients=[client],
     )
 
@@ -104,7 +105,7 @@ def test_project_artifact_service_collects_instructions_and_gitignore(tmp_path: 
         manifest=ProjectManifest(sources={}),
         resolved_sources={},
         runtime_env=RuntimeEnv(),
-        mcp_manifest={},
+        prepared_artifacts=PreparedArtifacts(),
         clients=[client],
     )
 
@@ -123,6 +124,8 @@ def test_project_artifact_service_collects_instructions_and_gitignore(tmp_path: 
 
     gitignore_specs = by_kind["git-safety"].resolve()
     assert len(gitignore_specs) == 1
-    assert gitignore_specs[0].file_path == project_root / ".gitignore"
-    assert gitignore_specs[0].target == "ai-sync:gitignore"
-    assert ".env.ai-sync" in str(gitignore_specs[0].value)
+    gitignore_spec = gitignore_specs[0]
+    assert isinstance(gitignore_spec, WriteSpec)
+    assert gitignore_spec.file_path == project_root / ".gitignore"
+    assert gitignore_spec.target == "ai-sync:gitignore"
+    assert ".env.ai-sync" in str(gitignore_spec.value)

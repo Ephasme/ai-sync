@@ -101,9 +101,9 @@ class CodexClient(Client):
         else:
             table["command"] = server.get("command", "npx")
             table["args"] = server.get("args", [])
-            env = self._build_mcp_env(server, secret_srv)
-            if env:
-                table["env"] = env
+        env = self._build_mcp_env(server, secret_srv)
+        if env:
+            table["env"] = env
         if server.get("description"):
             table["description"] = str(server["description"])
         oauth_cfg = server.get("oauth", {})

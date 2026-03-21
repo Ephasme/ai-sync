@@ -11,6 +11,7 @@ from ai_sync.services.git_safety_service import SENSITIVE_PATHS
 
 if TYPE_CHECKING:
     from ai_sync.clients.base import Client
+    from ai_sync.data_classes.prepared_artifacts import PreparedArtifacts
     from ai_sync.data_classes.resolved_source import ResolvedSource
     from ai_sync.data_classes.runtime_env import RuntimeEnv
     from ai_sync.models import ProjectManifest
@@ -26,10 +27,10 @@ class ProjectArtifactService:
         manifest: "ProjectManifest",
         resolved_sources: dict[str, "ResolvedSource"],
         runtime_env: "RuntimeEnv",
-        mcp_manifest: dict,
+        prepared_artifacts: "PreparedArtifacts",
         clients: list["Client"],
     ) -> list[Artifact]:
-        del resolved_sources, mcp_manifest
+        del resolved_sources, prepared_artifacts
 
         return [
             *self._env_artifacts(project_root, runtime_env),
@@ -39,14 +40,14 @@ class ProjectArtifactService:
         ]
 
     def _env_artifacts(self, project_root: Path, runtime_env: "RuntimeEnv") -> list[Artifact]:
-        if not runtime_env.env and not runtime_env.local_vars:
+        if not runtime_env.local_vars:
             return []
         env_path = project_root / ".env.ai-sync"
 
         def make_resolve(re=runtime_env, ep=env_path):
             def resolve():
-                all_keys = set(re.env.keys()) | set(re.local_vars.keys())
-                lines = [f"{key}={re.env.get(key, '')}" for key in sorted(all_keys)]
+                local_keys = sorted(re.local_vars.keys())
+                lines = [f"{key}={re.env.get(key, '')}" for key in local_keys]
                 content = "\n".join(lines) + "\n"
                 return [WriteSpec(file_path=ep, format="text", target="ai-sync:env", value=content)]
 

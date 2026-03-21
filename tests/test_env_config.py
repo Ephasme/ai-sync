@@ -4,102 +4,144 @@ from pathlib import Path
 
 import pytest
 
-from ai_sync.models import EnvVarConfig
+from ai_sync.models import parse_env_dependencies
 from ai_sync.services.environment_service import EnvironmentService
 
 
-class _NoopSecretService:
-    def resolve(self, values: dict[str, str], config_root: Path | None = None) -> dict[str, str]:
-        return values
+class _FakeSecretService:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, str]] = []
+
+    def resolve(
+        self,
+        values: dict[str, str],
+        config_root: Path | None = None,
+    ) -> dict[str, str]:
+        del config_root
+        self.calls.append(dict(values))
+        return {name: f"resolved:{ref}" for name, ref in values.items()}
 
 
-ENV_CONFIG_SERVICE = EnvironmentService(op_secret_service=_NoopSecretService())  # type: ignore[arg-type]
+def _service(fake: _FakeSecretService | None = None) -> EnvironmentService:
+    return EnvironmentService(op_secret_service=fake or _FakeSecretService())  # type: ignore[arg-type]
 
 
-def test_load_env_config_global_and_local(tmp_path: Path) -> None:
-    env_yaml = tmp_path / "env.yaml"
-    env_yaml.write_text(
-        "TOKEN:\n  value: abc\nSECRET:\n  scope: local\n  description: personal secret\n",
-        encoding="utf-8",
+def test_parse_dependencies_literal_local_and_secret_modes() -> None:
+    deps = parse_env_dependencies(
+        {
+            "env": {
+                "AWS_REGION": "eu-west-3",
+                "AWS_PROFILE": {
+                    "local": {"default": "sandbox-admin"},
+                    "description": "Local profile",
+                },
+                "SLACK_USER_TOKEN": {
+                    "secret": {
+                        "provider": "op",
+                        "ref": "op://Vault/Item/SLACK_USER_TOKEN",
+                    }
+                },
+            }
+        },
+        context="test",
     )
-    config = ENV_CONFIG_SERVICE.load_env_config(env_yaml)
-    assert config["TOKEN"].value == "abc"
-    assert config["TOKEN"].scope == "global"
-    assert config["SECRET"].scope == "local"
-    assert config["SECRET"].value is None
-    assert config["SECRET"].description == "personal secret"
+    assert deps["AWS_REGION"].mode == "literal"
+    assert deps["AWS_REGION"].literal == "eu-west-3"
+    assert deps["AWS_PROFILE"].mode == "local"
+    assert deps["AWS_PROFILE"].local_default == "sandbox-admin"
+    assert deps["SLACK_USER_TOKEN"].mode == "secret"
+    assert deps["SLACK_USER_TOKEN"].secret_provider == "op"
 
 
-def test_load_env_config_shorthand_string_value(tmp_path: Path) -> None:
-    env_yaml = tmp_path / "env.yaml"
-    env_yaml.write_text("TOKEN: abc\n", encoding="utf-8")
-    config = ENV_CONFIG_SERVICE.load_env_config(env_yaml)
-    assert config["TOKEN"].value == "abc"
-    assert config["TOKEN"].scope == "global"
+def test_parse_dependencies_rejects_invalid_provider() -> None:
+    with pytest.raises(RuntimeError, match="provider must be 'op'"):
+        parse_env_dependencies(
+            {
+                "env": {
+                    "TOKEN": {
+                        "secret": {"provider": "vault", "ref": "vault://token"},
+                    }
+                }
+            },
+            context="test",
+        )
 
 
-def test_load_env_config_global_missing_value(tmp_path: Path) -> None:
-    env_yaml = tmp_path / "env.yaml"
-    env_yaml.write_text("TOKEN:\n  scope: global\n", encoding="utf-8")
-    with pytest.raises(RuntimeError, match="Global-scoped env vars must have a value"):
-        ENV_CONFIG_SERVICE.load_env_config(env_yaml)
+def test_parse_dependencies_rejects_invalid_var_name() -> None:
+    with pytest.raises(RuntimeError, match="invalid env var name"):
+        parse_env_dependencies({"env": {"bad-name": "x"}}, context="test")
 
 
-def test_load_env_config_local_with_value(tmp_path: Path) -> None:
-    env_yaml = tmp_path / "env.yaml"
-    env_yaml.write_text("TOKEN:\n  scope: local\n  value: oops\n", encoding="utf-8")
-    with pytest.raises(RuntimeError, match="Local-scoped env vars must not have a value"):
-        ENV_CONFIG_SERVICE.load_env_config(env_yaml)
-
-
-def test_load_env_config_invalid_yaml(tmp_path: Path) -> None:
-    env_yaml = tmp_path / "env.yaml"
-    env_yaml.write_text(":\n  bad yaml {{{\n", encoding="utf-8")
-    with pytest.raises(RuntimeError, match="Failed to parse"):
-        ENV_CONFIG_SERVICE.load_env_config(env_yaml)
-
-
-def test_load_env_config_not_a_mapping(tmp_path: Path) -> None:
-    env_yaml = tmp_path / "env.yaml"
-    env_yaml.write_text("- item1\n- item2\n", encoding="utf-8")
-    with pytest.raises(RuntimeError, match="expected a mapping"):
-        ENV_CONFIG_SERVICE.load_env_config(env_yaml)
-
-
-def test_load_env_config_null_entry(tmp_path: Path) -> None:
-    env_yaml = tmp_path / "env.yaml"
-    env_yaml.write_text("TOKEN:\n", encoding="utf-8")
-    with pytest.raises(RuntimeError, match="Invalid env.yaml entry"):
-        ENV_CONFIG_SERVICE.load_env_config(env_yaml)
-
-
-def test_load_env_config_empty_file(tmp_path: Path) -> None:
-    env_yaml = tmp_path / "env.yaml"
-    env_yaml.write_text("", encoding="utf-8")
-    assert ENV_CONFIG_SERVICE.load_env_config(env_yaml) == {}
+def test_parse_dependencies_rejects_local_secret_mode_conflict() -> None:
+    with pytest.raises(RuntimeError, match="exactly one of 'local' or 'secret'"):
+        parse_env_dependencies(
+            {
+                "env": {
+                    "TOKEN": {
+                        "local": {},
+                        "secret": {"provider": "op", "ref": "op://Vault/Item/TOKEN"},
+                    }
+                }
+            },
+            context="test",
+        )
 
 
 def test_read_existing_env_file_with_values(tmp_path: Path) -> None:
     (tmp_path / ".env.ai-sync").write_text("A=1\nB=hello\n", encoding="utf-8")
-    result = ENV_CONFIG_SERVICE.read_existing_env_file(tmp_path)
+    result = _service().read_existing_env_file(tmp_path)
     assert result == {"A": "1", "B": "hello"}
 
 
 def test_read_existing_env_file_missing(tmp_path: Path) -> None:
-    assert ENV_CONFIG_SERVICE.read_existing_env_file(tmp_path) == {}
+    assert _service().read_existing_env_file(tmp_path) == {}
 
 
 def test_read_existing_env_file_empty(tmp_path: Path) -> None:
     (tmp_path / ".env.ai-sync").write_text("", encoding="utf-8")
-    assert ENV_CONFIG_SERVICE.read_existing_env_file(tmp_path) == {}
+    assert _service().read_existing_env_file(tmp_path) == {}
 
 
-def test_env_var_config_op_ref() -> None:
-    cfg = EnvVarConfig(value="op://Vault/Item/field")
-    assert cfg.scope == "global"
-    assert cfg.value == "op://Vault/Item/field"
+def test_resolve_runtime_env_uses_local_value_then_default_then_warns(tmp_path: Path) -> None:
+    fake = _FakeSecretService()
+    service = _service(fake)
+    (tmp_path / ".env.ai-sync").write_text("HAS_LOCAL=from-file\n", encoding="utf-8")
+    deps = parse_env_dependencies(
+        {
+            "env": {
+                "HAS_LOCAL": {"local": {}},
+                "WITH_DEFAULT": {"local": {"default": "fallback"}},
+                "MISSING_LOCAL": {"local": {}, "description": "missing token"},
+                "LITERAL_VAL": "fixed",
+                "SECRET_VAL": {
+                    "secret": {"provider": "op", "ref": "op://Vault/Item/secret"}
+                },
+            }
+        },
+        context="test",
+    )
+
+    resolved = service.resolve_runtime_env(tmp_path, deps, None)
+    assert resolved.env["HAS_LOCAL"] == "from-file"
+    assert resolved.env["WITH_DEFAULT"] == "fallback"
+    assert resolved.env["LITERAL_VAL"] == "fixed"
+    assert resolved.env["SECRET_VAL"] == "resolved:op://Vault/Item/secret"
+    assert "MISSING_LOCAL" in resolved.unfilled_local_vars
+    assert any("MISSING_LOCAL" in warning for warning in resolved.warnings)
+    assert fake.calls == [{"SECRET_VAL": "op://Vault/Item/secret"}]
 
 
-def test_env_var_config_description_optional() -> None:
-    cfg = EnvVarConfig(value="plain")
-    assert cfg.description is None
+def test_resolve_runtime_env_does_not_call_secret_service_without_secret_dependencies(
+    tmp_path: Path,
+) -> None:
+    fake = _FakeSecretService()
+    service = _service(fake)
+    deps = parse_env_dependencies({"env": {"LITERAL_ONLY": "x"}}, context="test")
+    resolved = service.resolve_runtime_env(tmp_path, deps, None)
+    assert resolved.env["LITERAL_ONLY"] == "x"
+    assert fake.calls == []
+
+
+def test_parse_dependencies_rejects_unknown_top_level_key() -> None:
+    with pytest.raises(RuntimeError, match="supports only 'env'"):
+        parse_env_dependencies({"env": {}, "extra": {}}, context="test")

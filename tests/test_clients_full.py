@@ -46,6 +46,26 @@ def test_codex_sync_mcp_and_config(monkeypatch, tmp_path: Path) -> None:
     assert data["sandbox_mode"] == "danger-full-access"
 
 
+def test_codex_sync_http_mcp_includes_env(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    store = StateStore(tmp_path)
+    client = CodexClient(tmp_path)
+    servers = {
+        "default-s1": {
+            "method": "http",
+            "url": "https://x",
+            "env": {"A": "B"},
+        }
+    }
+    secrets = {"servers": {"default-s1": {"env": {"SECRET": "1"}}}}
+    specs = client.build_mcp_specs(servers, secrets)
+    track_write_blocks(specs, store)
+    config_path = tmp_path / ".codex" / "config.toml"
+    data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    assert data["mcp_servers"]["default-s1"]["url"] == "https://x"
+    assert data["mcp_servers"]["default-s1"]["env"] == {"A": "B", "SECRET": "1"}
+
+
 def test_cursor_sync_mcp_and_config(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     store = StateStore(tmp_path)

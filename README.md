@@ -183,8 +183,7 @@ A source repo is a catalog of reusable artifacts:
 ├── mcp-servers/
 │   └── <server-id>/
 │       └── artifact.yaml
-├── requirements.yaml
-└── env.yaml
+└── requirements.yaml
 ```
 
 ### Resource ids
@@ -194,6 +193,7 @@ A source repo is a catalog of reusable artifacts:
 - Commands come from `commands/**/<name>/artifact.yaml` plus sibling `prompt.md` and are referenced as `<alias>/<relative-path>`.
 - Rules come from `rules/<name>/artifact.yaml` plus `rules/<name>/prompt.md` and are referenced as `<alias>/<name>`.
 - MCP servers come from `mcp-servers/<server-id>/artifact.yaml` and are referenced as `<alias>/<server-id>`.
+- MCP-only: rendered subprocess `env` is synthesized from the server's declared `dependencies.env` entries after runtime resolution.
 
 ### Bundle artifact format
 
@@ -234,27 +234,33 @@ Notes:
 
 ## Secrets
 
-Secrets stay as references in source repos and project config. `ai-sync` resolves them locally and can generate a project-local `.env.ai-sync` file when needed.
+Each selected artifact can declare its own env dependencies in `artifact.yaml` under `dependencies.env`.
 
-Example `env.yaml`:
+Example:
 
 ```yaml
-CONTEXT7_API_KEY:
-  value: op://Example Vault/AI Tools/CONTEXT7_API_KEY
-EXA_API_KEY:
-  value: op://Example Vault/AI Tools/EXA_API_KEY
-PUBLIC_CLIENT_ID:
-  value: abc123
-GITHUB_PAT:
-  scope: local
-  description: Personal GitHub PAT
+dependencies:
+  env:
+    PUBLIC_CLIENT_ID: abc123
+
+    GITHUB_PAT:
+      local: {}
+      description: Personal GitHub PAT
+
+    CONTEXT7_API_KEY:
+      secret:
+        provider: op
+        ref: op://Example Vault/AI Tools/CONTEXT7_API_KEY
 ```
 
 Rules:
 
-- plan artifacts never store plaintext secret values
-- plans show secret-backed outputs in redacted form
-- apply fails if required secret values cannot be resolved
+- only dependencies from selected artifacts are resolved
+- `secret.provider` currently supports `op` only
+- unresolved declared local vars are warnings unless strict runtime interpolation requires them
+- `.env.ai-sync` is generated only when selected dependencies include `local` entries
+- secret dependencies are never written to `.env.ai-sync`
+- for MCP servers, `ai-sync` renders subprocess `env` from `dependencies.env`; do not author MCP `env` blocks in source artifacts
 
 ## Project-local outputs
 
@@ -296,17 +302,44 @@ ai-sync uninstall [--apply]
 
 ## Architecture
 
-Runtime orchestration is class-based and dependency-injected:
+### Dependency injection
 
 - The composition root lives in `ai_sync.di`, with providers declared in `AppContainer`.
 - The only runtime entrypoint is `cli.main()`, which calls `bootstrap_runtime()` to resolve `CommandHandlersService`.
 - Command flows (`install`, `plan`, `apply`, `doctor`, `uninstall`) are implemented on service classes under `ai_sync.services`.
-- Adapter boundaries (`filesystem`, `process runner`) isolate side effects from orchestration logic.
+- Adapter boundaries (`filesystem`, `process runner`, `state store`) isolate side effects from orchestration logic.
+
+### Universal artifact pipeline
+
+All artifact kinds flow through one shared pipeline:
+
+```
+select → load → prepare (pre-runtime) → resolve RuntimeEnv → prepare (post-runtime) → collect artifacts → resolve ApplySpecs → apply & reconcile
+```
+
+- `ArtifactPreparationService` orchestrates preparation in two explicit phases: pre-runtime (validation, env dependency collection) and post-runtime (interpolation, rendering) after `RuntimeEnv` is resolved.
+- The shared `PreparedArtifacts` boundary carries per-kind payloads (e.g. `PreparedMcpServer`) so downstream collectors, requirement checks, and plan builders all receive the same context.
+- Kind-specific logic (MCP validation, env interpolation, rendered `env` synthesis) lives in `McpPreparationService`, called as a preparation hook inside the shared pipeline.
+
+### Apply contract
+
+Every artifact resolves into a sequence of `ApplySpec`, a union of two concrete types:
+
+- `WriteSpec` — managed file writes (text markers, structured JSON/TOML/YAML keys).
+- `EffectSpec` — managed side effects (pre-commit hook install/remove, file permission changes).
+
+Both types are planned, confirmed, executed, and reversed through the same state-backed reconciliation engine in `ManagedOutputService` and `StateStore`.
+
+### State management
+
+- Managed state is persisted in `.ai-sync/state/state.json` with an explicit `STATE_VERSION`.
+- Write baselines and effect baselines are tracked separately so `uninstall` can restore prior state for both files and side effects.
+- Incompatible state from an older pipeline version is rejected with an actionable error directing the user to `ai-sync uninstall --apply` before reapplying.
 
 ## Testing
 
 ```bash
-python -m pytest tests
+just test
 ```
 
 DI-heavy tests should prefer provider overrides over module monkeypatching:

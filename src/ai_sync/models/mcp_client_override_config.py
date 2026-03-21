@@ -1,4 +1,4 @@
-"""Client override configuration model."""
+"""MCP client override config model."""
 
 from typing import Literal
 
@@ -7,7 +7,9 @@ from pydantic import BaseModel, ConfigDict, StrictFloat, StrictInt
 from ai_sync.models.oauth_override_config import OAuthOverrideConfig
 
 
-class ClientOverrideConfig(BaseModel):
+class McpClientOverrideConfig(BaseModel):
+    """Per-client MCP server field overrides from a source artifact."""
+
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = None
@@ -15,7 +17,6 @@ class ClientOverrideConfig(BaseModel):
     command: str | None = None
     args: list[str] | None = None
     url: str | None = None
-    env: dict[str, str] | None = None
     auth: dict[str, str] | None = None
     oauth: OAuthOverrideConfig | None = None
     headers: dict[str, str] | None = None

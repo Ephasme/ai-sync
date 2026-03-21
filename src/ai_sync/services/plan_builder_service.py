@@ -7,17 +7,22 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ai_sync.clients import ClientFactory
+from ai_sync.data_classes.artifact import Artifact
+from ai_sync.data_classes.effect_spec import EffectSpec
 from ai_sync.data_classes.resolved_artifact_set import ResolvedArtifactSet
+from ai_sync.data_classes.write_spec import WriteSpec
 from ai_sync.models import ApplyPlan, PlanAction, PlanSource
 from ai_sync.services.artifact_service import ArtifactService
 from ai_sync.services.git_safety_service import GitSafetyService
 from ai_sync.services.managed_output_service import ManagedOutputService
 
 if TYPE_CHECKING:
-    from ai_sync.data_classes.artifact import Artifact
+    from collections.abc import Sequence
+
+    from ai_sync.data_classes.apply_spec import ApplySpec
+    from ai_sync.data_classes.prepared_artifacts import PreparedArtifacts
     from ai_sync.data_classes.resolved_source import ResolvedSource
     from ai_sync.data_classes.runtime_env import RuntimeEnv
-    from ai_sync.data_classes.write_spec import WriteSpec
     from ai_sync.models import ProjectManifest
 
 _CLIENT_DIR_PREFIXES = (".cursor/", ".claude/", ".codex/", ".gemini/")
@@ -45,25 +50,32 @@ class PlanBuilderService:
         project_root: Path,
         manifest: "ProjectManifest",
         resolved_sources: dict[str, "ResolvedSource"],
-        runtime_env: RuntimeEnv,
-        mcp_manifest: dict,
+        runtime_env: "RuntimeEnv",
+        prepared_artifacts: "PreparedArtifacts",
     ) -> ResolvedArtifactSet:
         clients = self._client_factory.create_clients(project_root)
-        artifacts = self._artifact_service.collect_artifacts(
-            project_root=project_root,
-            manifest=manifest,
-            resolved_sources=resolved_sources,
-            runtime_env=runtime_env,
-            mcp_manifest=mcp_manifest,
-            clients=clients,
+        artifacts = list(
+            self._artifact_service.collect_artifacts(
+                project_root=project_root,
+                manifest=manifest,
+                resolved_sources=resolved_sources,
+                runtime_env=runtime_env,
+                prepared_artifacts=prepared_artifacts,
+                clients=clients,
+            )
         )
-        entries: list[tuple[Artifact, list[WriteSpec]]] = []
+        artifacts.extend(
+            self._git_safety_hook_artifacts(project_root, prepared_artifacts)
+        )
+
+        entries: list[tuple[Artifact, Sequence[ApplySpec]]] = []
         desired_targets: set[tuple[str, str, str]] = set()
         for artifact in artifacts:
             specs = artifact.resolve()
             entries.append((artifact, specs))
             for spec in specs:
-                desired_targets.add((str(spec.file_path), spec.format, spec.target))
+                if isinstance(spec, WriteSpec):
+                    desired_targets.add((str(spec.file_path), spec.format, spec.target))
         return ResolvedArtifactSet(entries=entries, desired_targets=desired_targets)
 
     def build_plan(
@@ -73,8 +85,8 @@ class PlanBuilderService:
         manifest: "ProjectManifest",
         manifest_hash: str,
         resolved_sources: dict[str, "ResolvedSource"],
-        runtime_env: RuntimeEnv,
-        mcp_manifest: dict,
+        runtime_env: "RuntimeEnv",
+        prepared_artifacts: "PreparedArtifacts",
     ) -> tuple[ApplyPlan, ResolvedArtifactSet]:
         source_models = [
             PlanSource(
@@ -93,26 +105,31 @@ class PlanBuilderService:
             manifest=manifest,
             resolved_sources=resolved_sources,
             runtime_env=runtime_env,
-            mcp_manifest=mcp_manifest,
+            prepared_artifacts=prepared_artifacts,
         )
 
         specs_by_plan_key: dict[str, list[WriteSpec]] = {}
+        effects_by_plan_key: dict[str, list[EffectSpec]] = {}
         artifact_by_plan_key: dict[str, Artifact] = {}
         for artifact, specs in resolved_set.entries:
             artifact_by_plan_key[artifact.plan_key] = artifact
             for spec in specs:
-                specs_by_plan_key.setdefault(artifact.plan_key, []).append(spec)
+                if isinstance(spec, WriteSpec):
+                    specs_by_plan_key.setdefault(artifact.plan_key, []).append(spec)
+                elif isinstance(spec, EffectSpec):
+                    effects_by_plan_key.setdefault(artifact.plan_key, []).append(spec)
 
         actions: list[PlanAction] = []
-        for plan_key, specs in specs_by_plan_key.items():
+
+        for plan_key, write_specs in specs_by_plan_key.items():
             status = self._managed_output_service.classify_plan_key_specs(
                 project_root=project_root,
-                specs=specs,
+                specs=write_specs,
             )
             if status == "unchanged":
                 continue
             art = artifact_by_plan_key[plan_key]
-            target_path = specs[0].file_path if specs else plan_key
+            target_path = write_specs[0].file_path if write_specs else plan_key
             actions.append(
                 PlanAction(
                     action=status,
@@ -128,6 +145,27 @@ class PlanBuilderService:
                 )
             )
 
+        for plan_key, effect_specs in effects_by_plan_key.items():
+            art = artifact_by_plan_key[plan_key]
+            for effect in effect_specs:
+                effect_status = self._classify_effect(project_root, effect)
+                if effect_status == "unchanged":
+                    continue
+                actions.append(
+                    PlanAction(
+                        action=effect_status,
+                        source_alias=art.source_alias,
+                        kind=art.kind,
+                        resource=art.resource,
+                        name=art.name,
+                        description=art.description,
+                        target=effect.target,
+                        target_key=effect.target_key,
+                        client=art.client,
+                        secret_backed=art.secret_backed,
+                    )
+                )
+
         stale_actions = self._build_stale_plan_actions(
             self._managed_output_service.list_stale_entries(
                 project_root=project_root,
@@ -136,12 +174,6 @@ class PlanBuilderService:
             project_root,
         )
         actions.extend(stale_actions)
-
-        git_safety_actions = self._build_git_safety_actions(
-            project_root,
-            bool(runtime_env.env) or bool(runtime_env.local_vars),
-        )
-        actions.extend(git_safety_actions)
 
         selections = {
             "agents": manifest.agents,
@@ -162,6 +194,78 @@ class PlanBuilderService:
             actions=actions,
         )
         return plan, resolved_set
+
+    def _classify_effect(self, project_root: Path, effect: EffectSpec) -> str:
+        """Classify an EffectSpec as create/update/delete/unchanged."""
+        if effect.effect_type == "pre-commit-hook-install":
+            status = self._git_safety_service.check_pre_commit_hook(project_root)
+            return "unchanged" if status == "installed" else "create"
+        if effect.effect_type == "pre-commit-hook-remove":
+            status = self._git_safety_service.check_pre_commit_hook(project_root)
+            return "delete" if status == "installed" else "unchanged"
+        if effect.effect_type == "chmod":
+            path = Path(effect.params.get("path", effect.target))
+            if not path.exists():
+                return "unchanged"
+            return "update"
+        return "unchanged"
+
+    def _git_safety_hook_artifacts(
+        self, project_root: Path, prepared_artifacts: "PreparedArtifacts"
+    ) -> list[Artifact]:
+        """Create git-safety hook artifacts as first-class EffectSpec producers."""
+        if prepared_artifacts.has_local_env:
+
+            def make_install_resolve() -> list[EffectSpec]:
+                return [
+                    EffectSpec(
+                        effect_type="pre-commit-hook-install",
+                        target=".git/hooks/pre-commit",
+                        target_key="git-safety:pre-commit-hook",
+                    )
+                ]
+
+            return [
+                Artifact(
+                    kind="git-safety",
+                    resource="pre-commit hook",
+                    name="pre-commit hook",
+                    description="Git safety hook required for local secret handling.",
+                    source_alias="project",
+                    plan_key="git-safety:pre-commit-hook",
+                    secret_backed=False,
+                    client="global",
+                    resolve_fn=make_install_resolve,
+                )
+            ]
+
+        hook_status = self._git_safety_service.check_pre_commit_hook(project_root)
+        if hook_status == "installed":
+
+            def make_remove_resolve() -> list[EffectSpec]:
+                return [
+                    EffectSpec(
+                        effect_type="pre-commit-hook-remove",
+                        target=".git/hooks/pre-commit",
+                        target_key="git-safety:pre-commit-hook",
+                    )
+                ]
+
+            return [
+                Artifact(
+                    kind="git-safety",
+                    resource="pre-commit hook",
+                    name="pre-commit hook",
+                    description="Remove ai-sync pre-commit hook when no local env vars are selected.",
+                    source_alias="project",
+                    plan_key="git-safety:pre-commit-hook",
+                    secret_backed=False,
+                    client="global",
+                    resolve_fn=make_remove_resolve,
+                )
+            ]
+
+        return []
 
     def _build_stale_plan_actions(
         self,
@@ -195,26 +299,6 @@ class PlanBuilderService:
                 )
             )
         return stale_actions
-
-    def _build_git_safety_actions(self, project_root: Path, has_env: bool) -> list[PlanAction]:
-        actions: list[PlanAction] = []
-        if has_env:
-            hook_status = self._git_safety_service.check_pre_commit_hook(project_root)
-            if hook_status == "missing":
-                actions.append(
-                    PlanAction(
-                        action="create",
-                        source_alias="project",
-                        kind="git-safety",
-                        resource="pre-commit hook",
-                        name="pre-commit hook",
-                        description="Git safety hook required for local secret handling.",
-                        target=".git/hooks/pre-commit",
-                        target_key="git-safety:pre-commit-hook",
-                        client="global",
-                    )
-                )
-        return actions
 
 
 def _infer_client_from_path(abs_path: str, project_root: str) -> str:

@@ -18,6 +18,7 @@ from ai_sync.helpers import delete_at_path, ensure_dir, get_at_path, set_at_path
 
 if TYPE_CHECKING:
     from ai_sync.data_classes.artifact import Artifact
+    from ai_sync.data_classes.effect_spec import EffectSpec
 
 
 class _DeleteSentinel:
@@ -107,8 +108,10 @@ class ManagedOutputService:
         project_root: Path,
         apply: bool,
     ) -> tuple[bool, bool]:
-        store = self._load_store(project_root)
-        if not store.list_entries():
+        store = self._load_store(project_root, strict_version=False)
+        has_entries = bool(store.list_entries())
+        has_effects = bool(store.list_effects())
+        if not has_entries and not has_effects:
             return (False, False)
 
         did_change = self.restore_baselines(store, apply=apply)
@@ -760,10 +763,29 @@ class ManagedOutputService:
             return "delete"
         return "update"
 
+    def record_and_save_effects(
+        self,
+        *,
+        project_root: Path,
+        effects: list[tuple["EffectSpec", dict]],
+    ) -> None:
+        """Persist effect baselines into the shared state store."""
+        store = self._load_store(project_root)
+        for effect, baseline in effects:
+            store.record_effect(
+                effect_type=effect.effect_type,
+                target=effect.target,
+                target_key=effect.target_key,
+                baseline=baseline,
+            )
+        store.save()
+
     @staticmethod
-    def _load_store(project_root: Path) -> StateStore:
+    def _load_store(project_root: Path, *, strict_version: bool = True) -> StateStore:
         store = StateStore(project_root)
         store.load()
+        if strict_version:
+            store.check_version()
         return store
 
     @staticmethod

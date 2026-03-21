@@ -1,4 +1,4 @@
-"""Service for MCP server manifest loading and filtering."""
+"""McpPreparationService: load and filter MCP server manifests from sources."""
 
 from __future__ import annotations
 
@@ -9,7 +9,9 @@ from typing import TYPE_CHECKING, Mapping
 import yaml
 from pydantic import ValidationError
 
-from ai_sync.models import MCPManifest, ServerConfig, split_scoped_ref
+from ai_sync.models.env_dependency import EnvDependency, parse_env_dependencies
+from ai_sync.models.mcp_server_config import McpServerConfig
+from ai_sync.models.project_manifest import split_scoped_ref
 from ai_sync.services.display_service import DisplayService
 
 if TYPE_CHECKING:
@@ -19,8 +21,8 @@ ENV_REF_RE = re.compile(r"\$(\w+)|\$\{([^}]+)\}")
 _ESCAPE_SENTINEL = "\x00"
 
 
-class McpServerService:
-    """Load and filter MCP server data from selected sources."""
+class McpPreparationService:
+    """McpPreparationService loads and filters MCP server definitions from configured sources."""
 
     def load_manifest(self, mcp_root: Path, display: DisplayService) -> dict:
         servers_dir = mcp_root / "mcp-servers"
@@ -40,11 +42,7 @@ class McpServerService:
                 continue
             servers[server_dir.name] = self.load_server_config(config_path)
 
-        try:
-            model = MCPManifest.model_validate({"servers": servers})
-        except ValidationError as exc:
-            raise RuntimeError(f"Manifest validation failed: {exc}") from exc
-        return model.model_dump(by_alias=True)
+        return {"servers": servers}
 
     def load_and_filter_mcp(
         self,
@@ -97,6 +95,18 @@ class McpServerService:
             return self._interpolate_env_refs(obj, env_map)
         return obj
 
+    def strip_dependency_metadata(self, obj: object) -> object:
+        """Return a deep copy without internal dependencies metadata."""
+        if isinstance(obj, dict):
+            return {
+                key: self.strip_dependency_metadata(value)
+                for key, value in obj.items()
+                if key != "dependencies"
+            }
+        if isinstance(obj, list):
+            return [self.strip_dependency_metadata(value) for value in obj]
+        return obj
+
     def load_server_config(self, path: Path) -> dict:
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -107,11 +117,77 @@ class McpServerService:
         if not isinstance(data, dict):
             raise RuntimeError(f"Invalid MCP server config {path}: expected a mapping")
 
+        env_dependencies = parse_env_dependencies(
+            data.get("dependencies"),
+            context=f"MCP server {path}",
+        )
+        runtime_config_data = {k: v for k, v in data.items() if k != "dependencies"}
+
         try:
-            model = ServerConfig.model_validate(data)
+            model = McpServerConfig.model_validate(runtime_config_data)
         except ValidationError as exc:
             raise RuntimeError(f"Invalid MCP server config {path}: {exc}") from exc
-        return model.model_dump(by_alias=True)
+        dumped = model.model_dump(by_alias=True, exclude_none=True)
+        if env_dependencies:
+            dumped["dependencies"] = env_dependencies
+        return dumped
+
+    def collect_declared_env_names(self, manifest: Mapping[str, object]) -> set[str]:
+        names: set[str] = set()
+        for server in manifest.values():
+            if not isinstance(server, dict):
+                continue
+            dependencies = server.get("dependencies")
+            if not isinstance(dependencies, dict):
+                continue
+            names.update(name for name, dep in dependencies.items() if isinstance(dep, EnvDependency))
+        return names
+
+    def synthesize_env_from_dependencies(
+        self,
+        runtime_manifest: Mapping[str, object],
+        source_manifest: Mapping[str, object],
+        env_map: Mapping[str, str],
+    ) -> dict[str, object]:
+        rendered: dict[str, object] = {}
+        for sid, runtime_server in runtime_manifest.items():
+            if not isinstance(runtime_server, dict):
+                rendered[sid] = runtime_server
+                continue
+
+            source_server = source_manifest.get(sid)
+            next_server = dict(runtime_server)
+            if isinstance(source_server, dict):
+                dependencies = source_server.get("dependencies")
+                if isinstance(dependencies, dict):
+                    synthesized_env = {
+                        name: env_map[name]
+                        for name, dep in dependencies.items()
+                        if isinstance(dep, EnvDependency) and name in env_map
+                    }
+                    if synthesized_env:
+                        next_server["env"] = synthesized_env
+            rendered[sid] = next_server
+        return rendered
+
+    def attach_dependency_metadata(
+        self,
+        runtime_manifest: Mapping[str, object],
+        source_manifest: Mapping[str, object],
+    ) -> dict[str, object]:
+        attached: dict[str, object] = {}
+        for sid, runtime_server in runtime_manifest.items():
+            if not isinstance(runtime_server, dict):
+                attached[sid] = runtime_server
+                continue
+            next_server = dict(runtime_server)
+            source_server = source_manifest.get(sid)
+            if isinstance(source_server, dict):
+                dependencies = source_server.get("dependencies")
+                if isinstance(dependencies, dict) and dependencies:
+                    next_server["dependencies"] = dependencies
+            attached[sid] = next_server
+        return attached
 
     def _interpolate_env_refs(self, value: str, env_map: dict[str, str]) -> str:
         escaped = value.replace("$$", _ESCAPE_SENTINEL)

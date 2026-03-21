@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ai_sync.data_classes.plan_context import PlanContext
+from ai_sync.services.artifact_preparation_service import ArtifactPreparationService
 from ai_sync.services.config_store_service import ConfigStoreService
 from ai_sync.services.display_service import DisplayService
-from ai_sync.services.environment_service import EnvironmentService
-from ai_sync.services.mcp_server_service import McpServerService
 from ai_sync.services.plan_builder_service import PlanBuilderService
 from ai_sync.services.plan_persistence_service import PlanPersistenceService
 from ai_sync.services.project_locator_service import ProjectLocatorService
@@ -18,6 +17,9 @@ from ai_sync.services.project_manifest_service import ProjectManifestService
 from ai_sync.services.source_resolver_service import SourceResolverService
 from ai_sync.services.tool_requirement_service import ToolRequirementService
 from ai_sync.services.tool_version_service import ToolVersionService
+
+if TYPE_CHECKING:
+    pass
 
 
 class PlanService:
@@ -27,10 +29,9 @@ class PlanService:
         self,
         *,
         source_resolver_service: SourceResolverService,
-        environment_service: EnvironmentService,
+        artifact_preparation_service: ArtifactPreparationService,
         project_locator_service: ProjectLocatorService,
         project_manifest_service: ProjectManifestService,
-        mcp_server_service: McpServerService,
         tool_requirement_service: ToolRequirementService,
         plan_builder_service: PlanBuilderService,
         plan_persistence_service: PlanPersistenceService,
@@ -41,16 +42,15 @@ class PlanService:
         from ai_sync.helpers import validate_client_settings
 
         self._source_resolver_service = source_resolver_service
+        self._artifact_preparation_service = artifact_preparation_service
         self._project_locator_service = project_locator_service
         self._project_manifest_service = project_manifest_service
-        self._mcp_server_service = mcp_server_service
         self._tool_requirement_service = tool_requirement_service
         self._plan_builder_service = plan_builder_service
         self._plan_persistence_service = plan_persistence_service
         self._config_store_service = config_store_service
         self._tool_version_service = tool_version_service
         self._validate_client_settings = validate_client_settings_fn or validate_client_settings
-        self._environment_service = environment_service
 
     def run(self, *, config_root: Path, display: DisplayService, out: str | None) -> int:
         """Execute the plan command: assemble context, render, and save."""
@@ -82,9 +82,6 @@ class PlanService:
         if errors:
             raise RuntimeError("\n".join(errors))
 
-        mcp_manifest = self._mcp_server_service.load_and_filter_mcp(
-            resolved_sources, manifest.mcp_servers, display
-        )
         req_results = self._tool_requirement_service.check_requirements(
             self._tool_requirement_service.load_and_filter_requirements(
                 resolved_sources,
@@ -96,38 +93,13 @@ class PlanService:
             if not result.ok and result.error:
                 display.print(f"Warning: {result.error}", style="warning")
 
-        runtime_env = self._environment_service.resolve_runtime_env(
-            project_root,
-            resolved_sources,
-            config_root,
+        prepared_artifacts, runtime_env = self._artifact_preparation_service.prepare(
+            project_root=project_root,
+            manifest=manifest,
+            resolved_sources=resolved_sources,
+            config_root=config_root,
+            display=display,
         )
-        required_vars = self._mcp_server_service.collect_env_refs(mcp_manifest)
-        missing = sorted(required_vars - runtime_env.env.keys())
-        if missing:
-            unfilled_local = [v for v in missing if v in runtime_env.unfilled_local_vars]
-            undeclared = [v for v in missing if v not in runtime_env.unfilled_local_vars]
-            parts: list[str] = []
-            if unfilled_local:
-                for name in unfilled_local:
-                    cfg = runtime_env.local_vars.get(name)
-                    hint = f" ({cfg.description})" if cfg and cfg.description else ""
-                    parts.append(
-                        f"{name}{hint} is local-scoped. "
-                        f"Set its value in {project_root / '.env.ai-sync'} and re-run."
-                    )
-            if undeclared:
-                parts.append(
-                    "MCP config references env vars not defined in any selected source env.yaml: "
-                    + ", ".join(undeclared)
-                )
-            raise RuntimeError("\n".join(parts))
-        if required_vars:
-            resolved_mcp_manifest = self._mcp_server_service.resolve_env_refs(
-                mcp_manifest, runtime_env.env
-            )
-            if not isinstance(resolved_mcp_manifest, dict):
-                raise RuntimeError("Resolved MCP manifest must remain a mapping.")
-            mcp_manifest = resolved_mcp_manifest
 
         plan, resolved_artifact_set = self._plan_builder_service.build_plan(
             project_root,
@@ -136,13 +108,13 @@ class PlanService:
             manifest_hash,
             resolved_sources,
             runtime_env,
-            mcp_manifest,
+            prepared_artifacts,
         )
         return PlanContext(
             plan=plan,
             manifest=manifest,
             resolved_sources=resolved_sources,
-            mcp_manifest=mcp_manifest,
+            prepared_artifacts=prepared_artifacts,
             runtime_env=runtime_env,
             secrets={"servers": {}},
             resolved_artifacts=resolved_artifact_set,

@@ -17,6 +17,7 @@ from ai_sync.services.artifact_bundle_service import ArtifactBundleService
 
 if TYPE_CHECKING:
     from ai_sync.clients.base import Client
+    from ai_sync.data_classes.prepared_artifacts import PreparedArtifacts
     from ai_sync.data_classes.resolved_source import ResolvedSource
     from ai_sync.data_classes.runtime_env import RuntimeEnv
     from ai_sync.models import ProjectManifest
@@ -86,10 +87,10 @@ class SkillArtifactService:
         manifest: "ProjectManifest",
         resolved_sources: dict[str, "ResolvedSource"],
         runtime_env: "RuntimeEnv",
-        mcp_manifest: dict,
+        prepared_artifacts: "PreparedArtifacts",
         clients: list["Client"],
     ) -> list[Artifact]:
-        del project_root, runtime_env, mcp_manifest
+        del project_root, runtime_env, prepared_artifacts
 
         artifacts: list[Artifact] = []
         for skill_ref in manifest.skills:
@@ -134,9 +135,13 @@ class SkillArtifactService:
                         description=artifact_description,
                         source_alias=alias,
                         plan_key=str(target_skill_dir),
-                        secret_backed=False,
+                        secret_backed=any(
+                            dep.mode == "secret"
+                            for dep in bundle.env_dependencies.values()
+                        ),
                         client=client.name,
                         resolve_fn=make_resolve(),
+                        env_dependencies=bundle.env_dependencies,
                     )
                 )
         return artifacts

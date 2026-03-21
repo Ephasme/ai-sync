@@ -1,9 +1,9 @@
 import pytest
 
-from ai_sync.services.mcp_server_service import McpServerService
+from ai_sync.services.mcp_preparation_service import McpPreparationService
 from ai_sync.services.one_password_cli_service import OnePasswordCliService
 
-SERVICE = McpServerService()
+SERVICE = McpPreparationService()
 
 
 def test_interpolate_env_refs_supports_both_forms() -> None:

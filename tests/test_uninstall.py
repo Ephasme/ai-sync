@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import tomli
@@ -235,3 +236,55 @@ def test_uninstall_structured_json_root_list(tmp_path: Path, monkeypatch) -> Non
     _run_uninstall(tmp_path, apply=True)
     data = json.loads(target.read_text(encoding="utf-8"))
     assert data == {}
+
+
+# ---------------------------------------------------------------------------
+# Effect restoration (chmod, empty effects)
+# ---------------------------------------------------------------------------
+
+
+def test_uninstall_restores_chmod_baseline(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    secret_path = tmp_path / "secret.json"
+    secret_path.write_text("{}", encoding="utf-8")
+    os.chmod(secret_path, 0o600)
+    assert secret_path.stat().st_mode & 0o777 == 0o600
+
+    state_dir = tmp_path / ".ai-sync" / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    missing_env_file = tmp_path / ".ai-sync" / "env.does-not-exist"
+    state = {
+        "version": 2,
+        "entries": [
+            {
+                "file_path": str(missing_env_file),
+                "format": "text",
+                "target": "ai-sync:env",
+                "baseline": {"exists": False},
+            }
+        ],
+        "effects": [
+            {
+                "effect_type": "chmod",
+                "target": str(secret_path),
+                "target_key": f"chmod:{secret_path}",
+                "baseline": {"prior_mode": 0o644},
+            }
+        ],
+    }
+    (state_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    result = _run_uninstall(tmp_path, apply=True)
+    assert result == 0
+    assert secret_path.stat().st_mode & 0o777 == 0o644
+
+
+def test_uninstall_with_no_effects_still_works(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    state_dir = tmp_path / ".ai-sync" / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    state = {"version": 2, "entries": [], "effects": []}
+    (state_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    result = _run_uninstall(tmp_path, apply=True)
+    assert result == 0

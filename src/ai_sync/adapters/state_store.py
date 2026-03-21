@@ -12,7 +12,11 @@ from ai_sync.helpers import ensure_dir
 
 __all__ = ["StateEntry", "StateStore"]
 
-STATE_VERSION = 1
+STATE_VERSION = 2
+
+
+class IncompatibleStateError(RuntimeError):
+    """Raised when persisted state version is incompatible with the running pipeline."""
 
 
 class StateStore:
@@ -20,8 +24,10 @@ class StateStore:
         self._state_root = project_root / ".ai-sync" / "state"
         self._state_path = self._state_root / "state.json"
         self._blob_dir = self._state_root / "blobs"
-        self._data: dict = {"version": STATE_VERSION, "entries": []}
+        self._data: dict = {"version": STATE_VERSION, "entries": [], "effects": []}
         self._index: dict[str, dict] = {}
+        self._effect_index: dict[str, dict] = {}
+        self._loaded_version: int = STATE_VERSION
 
     def load(self) -> None:
         if not self._state_path.exists():
@@ -33,10 +39,14 @@ class StateStore:
             return
         if not isinstance(data, dict):
             return
+        self._loaded_version = data.get("version", 1)
         entries = data.get("entries")
         if not isinstance(entries, list):
-            return
-        self._data = {"version": data.get("version", STATE_VERSION), "entries": entries}
+            entries = []
+        effects = data.get("effects")
+        if not isinstance(effects, list):
+            effects = []
+        self._data = {"version": STATE_VERSION, "entries": entries, "effects": effects}
         self._index = {}
         for entry in entries:
             if not isinstance(entry, dict):
@@ -44,6 +54,23 @@ class StateStore:
             key = self._make_key(entry.get("file_path"), entry.get("format"), entry.get("target"))
             if key:
                 self._index[key] = entry
+        self._effect_index = {}
+        for effect in effects:
+            if not isinstance(effect, dict):
+                continue
+            ekey = self._make_effect_key(effect.get("effect_type"), effect.get("target_key"))
+            if ekey:
+                self._effect_index[ekey] = effect
+
+    def check_version(self) -> None:
+        """Raise IncompatibleStateError when the persisted state predates this pipeline."""
+        if self._loaded_version != STATE_VERSION:
+            raise IncompatibleStateError(
+                f"Persisted state version {self._loaded_version} is incompatible with "
+                f"the current pipeline (version {STATE_VERSION}). "
+                "Run `ai-sync uninstall --apply` to clean up old managed state, "
+                "then reapply with `ai-sync apply`."
+            )
 
     def save(self) -> None:
         ensure_dir(self._state_root)
@@ -176,6 +203,58 @@ class StateStore:
             if self._make_key(entry.get("file_path"), entry.get("format"), entry.get("target")) != key
         ]
 
+    # ------------------------------------------------------------------
+    # Effect tracking
+    # ------------------------------------------------------------------
+
+    def list_effects(self) -> list[dict]:
+        return list(self._data.get("effects", []))
+
+    def get_effect(self, effect_type: str, target_key: str) -> dict | None:
+        ekey = self._make_effect_key(effect_type, target_key)
+        if not ekey:
+            return None
+        return self._effect_index.get(ekey)
+
+    def record_effect(
+        self,
+        *,
+        effect_type: str,
+        target: str,
+        target_key: str,
+        baseline: dict,
+    ) -> None:
+        """Record an effect baseline, only if not already tracked."""
+        ekey = self._make_effect_key(effect_type, target_key)
+        if not ekey:
+            raise ValueError("Invalid effect key")
+        if ekey in self._effect_index:
+            return
+        entry = {
+            "effect_type": effect_type,
+            "target": target,
+            "target_key": target_key,
+            "baseline": baseline,
+        }
+        self._data["effects"].append(entry)
+        self._effect_index[ekey] = entry
+
+    def remove_effect(self, effect_type: str, target_key: str) -> None:
+        ekey = self._make_effect_key(effect_type, target_key)
+        if not ekey:
+            return
+        self._effect_index.pop(ekey, None)
+        effects = self._data.get("effects", [])
+        self._data["effects"] = [
+            e
+            for e in effects
+            if self._make_effect_key(e.get("effect_type"), e.get("target_key")) != ekey
+        ]
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
     def delete_state(self) -> None:
         if not self._state_root.exists():
             return
@@ -201,6 +280,12 @@ class StateStore:
         if not isinstance(file_path, str) or not isinstance(format, str) or not isinstance(target, str):
             return None
         return f"{file_path}::{format}::{target}"
+
+    @staticmethod
+    def _make_effect_key(effect_type: object, target_key: object) -> str | None:
+        if not isinstance(effect_type, str) or not isinstance(target_key, str):
+            return None
+        return f"{effect_type}::{target_key}"
 
     @staticmethod
     def _write_atomic(path: Path, content: str) -> None:
