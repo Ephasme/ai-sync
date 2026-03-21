@@ -1,4 +1,4 @@
-"""Requirement version constraint model."""
+"""Binary dependency version constraint model."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import re
 from pydantic import BaseModel, field_validator
 
 
-class RequirementVersion(BaseModel):
+class BinaryDependencyVersion(BaseModel):
     require: str
     get_cmd: str | None = None
 

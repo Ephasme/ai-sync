@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from ai_sync.data_classes.prepared_artifacts import PreparedArtifacts
 from ai_sync.data_classes.prepared_mcp_server import PreparedMcpServer
 from ai_sync.models import split_scoped_ref
+from ai_sync.models.binary_dependency import BinaryDependency
 from ai_sync.models.env_dependency import EnvDependency
 from ai_sync.services.artifact_bundle_service import ArtifactBundleService
 from ai_sync.services.display_service import DisplayService
@@ -63,6 +64,13 @@ class ArtifactPreparationService:
             mcp_source_configs=mcp_source_configs,
         )
 
+        # 2b. Collect binary dependencies from all selected artifacts
+        collected_binaries = self._collect_binary_dependencies(
+            manifest=manifest,
+            resolved_sources=resolved_sources,
+            mcp_source_configs=mcp_source_configs,
+        )
+
         # --- RUNTIME ENV RESOLUTION ---
         # 3. Resolve RuntimeEnv
         runtime_env = self._environment_service.resolve_runtime_env(
@@ -85,6 +93,7 @@ class ArtifactPreparationService:
         prepared = PreparedArtifacts(
             mcp_servers=prepared_mcp,
             has_local_env=bool(runtime_env.local_vars),
+            binary_dependencies=collected_binaries,
         )
         return prepared, runtime_env
 
@@ -158,6 +167,68 @@ class ArtifactPreparationService:
             merge_from(ref, typed_deps)
 
         return merged
+
+    def _collect_binary_dependencies(
+        self,
+        *,
+        manifest: "ProjectManifest",
+        resolved_sources: dict[str, "ResolvedSource"],
+        mcp_source_configs: dict,
+    ) -> list[BinaryDependency]:
+        """Merge binary dependencies from all selected artifacts.
+
+        Identical declarations (same name + version + get_cmd) across artifacts
+        are deduplicated.  Conflicting declarations (same name, different
+        version or get_cmd) raise with provenance info.
+        """
+        merged: dict[str, tuple[BinaryDependency, str]] = {}
+
+        def merge_from(ref: str, binaries: list[BinaryDependency]) -> None:
+            for dep in binaries:
+                existing = merged.get(dep.name)
+                if existing is None:
+                    merged[dep.name] = (dep, ref)
+                    continue
+                if existing[0].version.model_dump() != dep.version.model_dump():
+                    raise RuntimeError(
+                        f"Binary dependency collision for {dep.name!r}: "
+                        f"{ref} conflicts with {existing[1]}."
+                    )
+
+        def collect_bundle(ref: str, base_dir_name: str) -> None:
+            alias, resource_id = split_scoped_ref(ref)
+            artifact_path = (
+                resolved_sources[alias].root / base_dir_name / resource_id / "artifact.yaml"
+            )
+            if not artifact_path.is_file():
+                return
+            bundle = self._artifact_bundle_service.load_artifact_yaml(
+                artifact_path,
+                defaults={},
+                metadata_keys=None,
+                required_keys={"name", "description"},
+            )
+            merge_from(ref, bundle.binary_dependencies)
+
+        for ref in manifest.agents:
+            collect_bundle(ref, "prompts")
+        for ref in manifest.skills:
+            collect_bundle(ref, "skills")
+        for ref in manifest.commands:
+            collect_bundle(ref, "commands")
+        for ref in manifest.rules:
+            collect_bundle(ref, "rules")
+
+        for ref in manifest.mcp_servers:
+            _, server_id = split_scoped_ref(ref)
+            server = mcp_source_configs.get(server_id)
+            if not isinstance(server, dict):
+                continue
+            binary_deps = server.get("_binary_dependencies") or []
+            if isinstance(binary_deps, list):
+                merge_from(ref, binary_deps)
+
+        return [dep for dep, _ref in merged.values()]
 
     def _finalize_mcp_servers(
         self,

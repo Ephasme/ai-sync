@@ -1,10 +1,14 @@
-"""Artifact-scoped environment dependency models and parsing."""
+"""Artifact-scoped dependency models and parsing."""
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
+
+from pydantic import ValidationError
+
+from ai_sync.models.binary_dependency import BinaryDependency
 
 ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
@@ -49,17 +53,49 @@ def _parse_dependencies_env_section(env_raw: object, *, context: str) -> dict[st
     return parsed
 
 
-def parse_env_dependencies(raw: object, *, context: str) -> dict[str, EnvDependency]:
-    """Parse a dependencies block and return normalized env dependencies."""
+@dataclass(frozen=True)
+class ArtifactDependencies:
+    """Parsed result of an artifact's ``dependencies`` block."""
+
+    env: dict[str, EnvDependency] = field(default_factory=dict)
+    binaries: list[BinaryDependency] = field(default_factory=list)
+
+
+def parse_artifact_dependencies(raw: object, *, context: str) -> ArtifactDependencies:
+    """Parse a dependencies block and return normalized env and binary dependencies."""
     if raw is None:
-        return {}
+        return ArtifactDependencies()
     if not isinstance(raw, dict):
         raise RuntimeError(f"{context}: dependencies must be a mapping.")
-    unknown_top = set(raw) - {"env"}
+    unknown_top = set(raw) - {"env", "binaries"}
     if unknown_top:
         extras = ", ".join(sorted(str(k) for k in unknown_top))
-        raise RuntimeError(f"{context}: dependencies supports only 'env'; found: {extras}.")
-    return _parse_dependencies_env_section(raw.get("env"), context=context)
+        raise RuntimeError(
+            f"{context}: dependencies supports only 'env' and 'binaries'; found: {extras}."
+        )
+    env = _parse_dependencies_env_section(raw.get("env"), context=context)
+    binaries = _parse_dependencies_binaries_section(raw.get("binaries"), context=context)
+    return ArtifactDependencies(env=env, binaries=binaries)
+
+
+def _parse_dependencies_binaries_section(
+    raw: object, *, context: str
+) -> list[BinaryDependency]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise RuntimeError(f"{context}: dependencies.binaries must be a list.")
+    parsed: list[BinaryDependency] = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise RuntimeError(f"{context}: dependencies.binaries[{i}] must be a mapping.")
+        try:
+            parsed.append(BinaryDependency.model_validate(entry))
+        except ValidationError as exc:
+            raise RuntimeError(
+                f"{context}: dependencies.binaries[{i}] validation failed: {exc}"
+            ) from exc
+    return parsed
 
 
 def _parse_env_dependency_entry(name: str, entry: object, *, context: str) -> EnvDependency:

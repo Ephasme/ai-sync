@@ -180,10 +180,9 @@ A source repo is a catalog of reusable artifacts:
 │       ├── artifact.yaml
 │       ├── prompt.md
 │       └── files/...   # optional reserved bundle assets
-├── mcp-servers/
-│   └── <server-id>/
-│       └── artifact.yaml
-└── requirements.yaml
+└── mcp-servers/
+    └── <server-id>/
+        └── artifact.yaml
 ```
 
 ### Resource ids
@@ -232,9 +231,10 @@ Notes:
 - Non-skill prompt-bearing bundles may also reserve `files/` in the source repo, but `ai-sync` does not sync those assets to client outputs yet.
 - To migrate older inline `prompt:` bundles, use `migration/scripts/migrate_to_split_prompt_bundles.py`.
 
-## Secrets
+## Artifact dependencies
 
-Each selected artifact can declare its own env dependencies in `artifact.yaml` under `dependencies.env`.
+Each selected artifact can declare dependencies in `artifact.yaml` under the `dependencies` block.
+Two dependency kinds are supported: `env` (environment variables and secrets) and `binaries` (version-checked executables on `PATH`).
 
 Example:
 
@@ -251,9 +251,18 @@ dependencies:
       secret:
         provider: op
         ref: op://Example Vault/AI Tools/CONTEXT7_API_KEY
+
+  binaries:
+    - name: npx
+      version:
+        require: ~10.0.0
+    - name: gh
+      version:
+        require: ^2.0.0
+        get_cmd: gh --version
 ```
 
-Rules:
+### Env rules
 
 - only dependencies from selected artifacts are resolved
 - `secret.provider` currently supports `op` only
@@ -261,6 +270,14 @@ Rules:
 - `.env.ai-sync` is generated only when selected dependencies include `local` entries
 - secret dependencies are never written to `.env.ai-sync`
 - for MCP servers, `ai-sync` renders subprocess `env` from `dependencies.env`; do not author MCP `env` blocks in source artifacts
+
+### Binary rules
+
+- binary requirements are collected from all selected artifact kinds (agents, skills, commands, rules, MCP servers)
+- identical declarations (same name + version constraint + get_cmd) across artifacts are deduplicated
+- conflicting declarations (same name, different version or get_cmd) raise a collision error
+- version constraints use `~X.Y.Z` (compatible within minor) or `^X.Y.Z` (compatible within major)
+- each binary is checked by running `[name] --version` unless `get_cmd` overrides the command
 
 ## Project-local outputs
 

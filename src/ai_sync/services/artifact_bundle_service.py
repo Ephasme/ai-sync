@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 
 from ai_sync.data_classes.artifact_bundle import ArtifactBundle
-from ai_sync.models import parse_env_dependencies
+from ai_sync.models import parse_artifact_dependencies
 
 BUNDLE_ARTIFACT_FILENAME = "artifact.yaml"
 BUNDLE_PROMPT_FILENAME = "prompt.md"
@@ -41,7 +41,7 @@ class ArtifactBundleService:
             raise RuntimeError(
                 f"Artifact file {artifact_path.name} must contain a YAML mapping."
             )
-        env_dependencies = parse_env_dependencies(
+        deps = parse_artifact_dependencies(
             data.pop("dependencies", None),
             context=f"Artifact bundle {artifact_path}",
         )
@@ -75,7 +75,8 @@ class ArtifactBundleService:
         return ArtifactBundle(
             metadata=result,
             prompt=prompt,
-            env_dependencies=env_dependencies,
+            env_dependencies=deps.env,
+            binary_dependencies=deps.binaries,
         )
 
     def require_prompt(self, bundle: ArtifactBundle, artifact_path: Path) -> str:

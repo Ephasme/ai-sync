@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Mapping
 import yaml
 from pydantic import ValidationError
 
-from ai_sync.models.env_dependency import EnvDependency, parse_env_dependencies
+from ai_sync.models.env_dependency import EnvDependency, parse_artifact_dependencies
 from ai_sync.models.mcp_server_config import McpServerConfig
 from ai_sync.models.project_manifest import split_scoped_ref
 from ai_sync.services.display_service import DisplayService
@@ -101,7 +101,7 @@ class McpPreparationService:
             return {
                 key: self.strip_dependency_metadata(value)
                 for key, value in obj.items()
-                if key != "dependencies"
+                if key not in ("dependencies", "_binary_dependencies")
             }
         if isinstance(obj, list):
             return [self.strip_dependency_metadata(value) for value in obj]
@@ -117,7 +117,7 @@ class McpPreparationService:
         if not isinstance(data, dict):
             raise RuntimeError(f"Invalid MCP server config {path}: expected a mapping")
 
-        env_dependencies = parse_env_dependencies(
+        artifact_deps = parse_artifact_dependencies(
             data.get("dependencies"),
             context=f"MCP server {path}",
         )
@@ -128,8 +128,10 @@ class McpPreparationService:
         except ValidationError as exc:
             raise RuntimeError(f"Invalid MCP server config {path}: {exc}") from exc
         dumped = model.model_dump(by_alias=True, exclude_none=True)
-        if env_dependencies:
-            dumped["dependencies"] = env_dependencies
+        if artifact_deps.env:
+            dumped["dependencies"] = artifact_deps.env
+        if artifact_deps.binaries:
+            dumped["_binary_dependencies"] = artifact_deps.binaries
         return dumped
 
     def collect_declared_env_names(self, manifest: Mapping[str, object]) -> set[str]:

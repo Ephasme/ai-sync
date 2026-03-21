@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ai_sync.models import parse_env_dependencies
+from ai_sync.models import parse_artifact_dependencies
 from ai_sync.services.environment_service import EnvironmentService
 
 
@@ -27,7 +27,7 @@ def _service(fake: _FakeSecretService | None = None) -> EnvironmentService:
 
 
 def test_parse_dependencies_literal_local_and_secret_modes() -> None:
-    deps = parse_env_dependencies(
+    deps = parse_artifact_dependencies(
         {
             "env": {
                 "AWS_REGION": "eu-west-3",
@@ -44,7 +44,7 @@ def test_parse_dependencies_literal_local_and_secret_modes() -> None:
             }
         },
         context="test",
-    )
+    ).env
     assert deps["AWS_REGION"].mode == "literal"
     assert deps["AWS_REGION"].literal == "eu-west-3"
     assert deps["AWS_PROFILE"].mode == "local"
@@ -55,7 +55,7 @@ def test_parse_dependencies_literal_local_and_secret_modes() -> None:
 
 def test_parse_dependencies_rejects_invalid_provider() -> None:
     with pytest.raises(RuntimeError, match="provider must be 'op'"):
-        parse_env_dependencies(
+        parse_artifact_dependencies(
             {
                 "env": {
                     "TOKEN": {
@@ -69,12 +69,12 @@ def test_parse_dependencies_rejects_invalid_provider() -> None:
 
 def test_parse_dependencies_rejects_invalid_var_name() -> None:
     with pytest.raises(RuntimeError, match="invalid env var name"):
-        parse_env_dependencies({"env": {"bad-name": "x"}}, context="test")
+        parse_artifact_dependencies({"env": {"bad-name": "x"}}, context="test")
 
 
 def test_parse_dependencies_rejects_local_secret_mode_conflict() -> None:
     with pytest.raises(RuntimeError, match="exactly one of 'local' or 'secret'"):
-        parse_env_dependencies(
+        parse_artifact_dependencies(
             {
                 "env": {
                     "TOKEN": {
@@ -106,7 +106,7 @@ def test_resolve_runtime_env_uses_local_value_then_default_then_warns(tmp_path: 
     fake = _FakeSecretService()
     service = _service(fake)
     (tmp_path / ".env.ai-sync").write_text("HAS_LOCAL=from-file\n", encoding="utf-8")
-    deps = parse_env_dependencies(
+    deps = parse_artifact_dependencies(
         {
             "env": {
                 "HAS_LOCAL": {"local": {}},
@@ -119,7 +119,7 @@ def test_resolve_runtime_env_uses_local_value_then_default_then_warns(tmp_path: 
             }
         },
         context="test",
-    )
+    ).env
 
     resolved = service.resolve_runtime_env(tmp_path, deps, None)
     assert resolved.env["HAS_LOCAL"] == "from-file"
@@ -136,12 +136,12 @@ def test_resolve_runtime_env_does_not_call_secret_service_without_secret_depende
 ) -> None:
     fake = _FakeSecretService()
     service = _service(fake)
-    deps = parse_env_dependencies({"env": {"LITERAL_ONLY": "x"}}, context="test")
+    deps = parse_artifact_dependencies({"env": {"LITERAL_ONLY": "x"}}, context="test").env
     resolved = service.resolve_runtime_env(tmp_path, deps, None)
     assert resolved.env["LITERAL_ONLY"] == "x"
     assert fake.calls == []
 
 
 def test_parse_dependencies_rejects_unknown_top_level_key() -> None:
-    with pytest.raises(RuntimeError, match="supports only 'env'"):
-        parse_env_dependencies({"env": {}, "extra": {}}, context="test")
+    with pytest.raises(RuntimeError, match="supports only 'env' and 'binaries'"):
+        parse_artifact_dependencies({"env": {}, "extra": {}}, context="test")

@@ -82,17 +82,6 @@ class PlanService:
         if errors:
             raise RuntimeError("\n".join(errors))
 
-        req_results = self._tool_requirement_service.check_requirements(
-            self._tool_requirement_service.load_and_filter_requirements(
-                resolved_sources,
-                manifest.mcp_servers,
-                display,
-            )
-        )
-        for result in req_results:
-            if not result.ok and result.error:
-                display.print(f"Warning: {result.error}", style="warning")
-
         prepared_artifacts, runtime_env = self._artifact_preparation_service.prepare(
             project_root=project_root,
             manifest=manifest,
@@ -100,6 +89,13 @@ class PlanService:
             config_root=config_root,
             display=display,
         )
+
+        req_results = self._tool_requirement_service.check_binary_dependencies(
+            prepared_artifacts.binary_dependencies,
+        )
+        for result in req_results:
+            if not result.ok and result.error:
+                display.print(f"Warning: {result.error}", style="warning")
 
         plan, resolved_artifact_set = self._plan_builder_service.build_plan(
             project_root,
