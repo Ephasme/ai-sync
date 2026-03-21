@@ -136,10 +136,6 @@ export const apiClient = {
       `/sources/${encodeURIComponent(alias)}/catalog`,
     ),
   getManifest: () => requestJson<ManifestResponse>("/manifest"),
-  bootstrapManifest: () =>
-    requestJson<ManifestResponse>("/bootstrap-manifest", {
-      method: "POST",
-    }),
   patchManifest: (changes: ManifestSelectionChange[]) =>
     requestJson<ManifestResponse>("/manifest", {
       method: "PATCH",

@@ -25,14 +25,6 @@ api_router = APIRouter()
 
 _MANIFEST_SELECTION_SECTIONS = {"agents", "skills", "commands", "rules", "mcp-servers"}
 _EMPTY_SELECTIONS = {section: [] for section in _MANIFEST_SELECTION_SECTIONS}
-_DEFAULT_BOOTSTRAP_MANIFEST = {
-    "sources": {
-        "sherpas-dev": {
-            "source": "git@github.com:Les-Sherpas/ai-sync-config-dev.git",
-            "version": "v1.5.0",
-        }
-    }
-}
 
 
 class ManifestSelectionChange(BaseModel):
@@ -177,35 +169,6 @@ def patch_manifest(
         yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
-    request.app.state.cached_plan_context = None
-    return {
-        "manifest_path": str(manifest_path),
-        "raw": manifest_path.read_text(encoding="utf-8"),
-        "manifest": manifest.model_dump(by_alias=True),
-    }
-
-
-@api_router.post("/bootstrap-manifest")
-def bootstrap_manifest(
-    request: Request,
-    container=Depends(get_container),
-    workspace_root: Path = Depends(get_workspace_root),
-    project_root: Path | None = Depends(get_project_root_optional),
-) -> dict[str, Any]:
-    if project_root is not None:
-        raise HTTPException(status_code=409, detail="A project manifest already exists in this workspace.")
-
-    manifest_path = workspace_root / ".ai-sync.yaml"
-    if manifest_path.exists():
-        raise HTTPException(status_code=409, detail="A project manifest already exists in this workspace.")
-
-    data = dict(_DEFAULT_BOOTSTRAP_MANIFEST)
-    manifest = ProjectManifest.model_validate(data)
-    manifest_path.write_text(
-        yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
-    )
-    request.app.state.project_root = workspace_root
     request.app.state.cached_plan_context = None
     return {
         "manifest_path": str(manifest_path),

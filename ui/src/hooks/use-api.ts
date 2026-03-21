@@ -73,31 +73,6 @@ export function usePatchManifestMutation() {
   });
 }
 
-export function useBootstrapManifestMutation() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: apiClient.bootstrapManifest,
-    onSuccess: async () => {
-      toast.success("Starter manifest created");
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.status }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.manifest }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.plan }),
-        queryClient.invalidateQueries({
-          predicate: (query) => query.queryKey[0] === "source-catalog",
-        }),
-      ]);
-    },
-    onError: (error) => {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Failed to create starter manifest",
-      );
-    },
-  });
-}
-
 export function useApplyPlanMutation() {
   const queryClient = useQueryClient();
   return useMutation<ApplyResponse>({

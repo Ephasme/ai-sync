@@ -2,22 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dependency_injector import providers
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from ai_sync.data_classes.resolved_source import ResolvedSource
 from ai_sync.di import create_container
 from ai_sync.web import create_app
-
-
-class _StaticSourceResolverService:
-    def __init__(self, resolved_sources: dict[str, ResolvedSource]) -> None:
-        self._resolved_sources = resolved_sources
-
-    def resolve_sources(self, project_root: Path, manifest) -> dict[str, ResolvedSource]:
-        del project_root, manifest
-        return self._resolved_sources
 
 
 def _write_project(tmp_path: Path) -> tuple[Path, Path]:
@@ -106,11 +95,7 @@ def _make_client(tmp_path: Path) -> tuple[TestClient, FastAPI]:
     return TestClient(app), app
 
 
-def _make_uninitialized_client(
-    tmp_path: Path,
-    *,
-    source_resolver_service: _StaticSourceResolverService | None = None,
-) -> tuple[TestClient, FastAPI]:
+def _make_uninitialized_client(tmp_path: Path) -> tuple[TestClient, FastAPI]:
     config_root = tmp_path / "config"
     config_root.mkdir()
     (config_root / "config.toml").write_text(
@@ -122,10 +107,6 @@ def _make_uninitialized_client(
     workspace_root.mkdir()
 
     container = create_container()
-    if source_resolver_service is not None:
-        container.override_providers(
-            source_resolver_service=providers.Object(source_resolver_service)
-        )
     app = create_app(
         container=container,
         project_root=None,
@@ -170,43 +151,6 @@ def test_manifest_endpoint_requires_initialized_workspace(tmp_path: Path) -> Non
 
     assert response.status_code == 409
     assert "Create one first" in response.json()["detail"]
-
-
-def test_bootstrap_manifest_endpoint_creates_default_manifest(tmp_path: Path) -> None:
-    client, app = _make_uninitialized_client(
-        tmp_path,
-        source_resolver_service=_StaticSourceResolverService(
-            {
-                "sherpas-dev": ResolvedSource(
-                    alias="sherpas-dev",
-                    source="git@github.com:Les-Sherpas/ai-sync-config-dev.git",
-                    version="v1.5.0",
-                    root=tmp_path / "scratch" / ".ai-sync" / "sources" / "sherpas-dev",
-                    kind="remote",
-                    fingerprint="test-fingerprint",
-                )
-            }
-        ),
-    )
-
-    response = client.post("/api/bootstrap-manifest")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["manifest_path"].endswith(".ai-sync.yaml")
-    assert "sherpas-dev" in data["raw"]
-    assert (
-        data["manifest"]["sources"]["sherpas-dev"]["source"]
-        == "git@github.com:Les-Sherpas/ai-sync-config-dev.git"
-    )
-    assert data["manifest"]["sources"]["sherpas-dev"]["version"] == "v1.5.0"
-    assert app.state.project_root == app.state.workspace_root
-    assert (app.state.workspace_root / ".ai-sync.yaml").exists()
-
-    status_response = client.get("/api/status")
-    assert status_response.status_code == 200
-    assert status_response.json()["initialized"] is True
-    assert status_response.json()["sources"][0]["alias"] == "sherpas-dev"
 
 
 def test_source_catalog_endpoint_lists_available_entries(tmp_path: Path) -> None:

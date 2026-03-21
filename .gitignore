@@ -46,18 +46,3 @@ ui/dist/
 # Transient documentation
 docs/
 src/ai_sync/web/static/
-
-# BEGIN ai-sync:gitignore
-.cursor/*
-.codex/*
-.gemini/*
-.claude/*
-.mcp.json
-CLAUDE.md
-.ai-sync/sources/
-.ai-sync/state/
-.ai-sync/rules/
-.ai-sync/last-plan.yaml
-.ai-sync.local.yaml
-.env.ai-sync
-# END ai-sync:gitignore

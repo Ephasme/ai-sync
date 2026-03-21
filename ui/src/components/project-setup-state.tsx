@@ -1,6 +1,4 @@
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useBootstrapManifestMutation } from "@/hooks/use-api";
 
 function manifestPath(root: string, filename: string) {
   return root.endsWith("/") ? `${root}${filename}` : `${root}/${filename}`;
@@ -11,8 +9,6 @@ export function ProjectSetupState({
 }: {
   workspaceRoot: string;
 }) {
-  const bootstrapManifestMutation = useBootstrapManifestMutation();
-
   return (
     <Card>
       <CardHeader>
@@ -37,23 +33,6 @@ export function ProjectSetupState({
           <p className="break-all font-mono text-xs">
             {manifestPath(workspaceRoot, ".ai-sync.local.yaml")}
           </p>
-        </div>
-        <div className="space-y-2">
-          <p>
-            You can also generate a starter manifest now with the default
-            Sherpas source:
-          </p>
-          <p className="break-all font-mono text-xs">
-            git@github.com:Les-Sherpas/ai-sync-config-dev.git @ v1.5.0
-          </p>
-          <Button
-            onClick={() => void bootstrapManifestMutation.mutateAsync()}
-            disabled={bootstrapManifestMutation.isPending}
-          >
-            {bootstrapManifestMutation.isPending
-              ? "Creating manifest..."
-              : "Create starter manifest"}
-          </Button>
         </div>
         <p>
           Once the manifest exists, the dashboard, sources, configuration, and

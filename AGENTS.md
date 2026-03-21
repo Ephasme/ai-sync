@@ -79,11 +79,3 @@ It syncs reusable resources from source repos into local project outputs so team
 
 `ai-sync` may append a managed rules index block to this file.
 Do not manually edit content inside managed marker blocks.
-
-<!-- BEGIN ai-sync:rules-index -->
-## ai-sync Rules (managed)
-
-You MUST read and follow ALL rules listed below:
-
-- [commit-conventions](.ai-sync/rules/sherpas-dev-commit-conventions.md)
-<!-- END ai-sync:rules-index -->
