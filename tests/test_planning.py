@@ -402,7 +402,7 @@ def test_unfilled_local_var_not_referenced_by_mcp_succeeds(tmp_path: Path) -> No
     context = _build_plan_context(project_root, config_root, display)
 
     assert "OPTIONAL_PAT" in context.runtime_env.unfilled_local_vars
-    assert "OPTIONAL_PAT" in context.runtime_env.local_vars
+    assert "OPTIONAL_PAT" in context.runtime_env.env_deps
 
     env_actions = [a for a in context.plan.actions if a.kind == "env-file"]
     assert len(env_actions) == 1

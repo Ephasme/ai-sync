@@ -105,7 +105,7 @@ class DoctorService:
                 project_root, config_root, display
             )
             hook_status = self._git_safety_service.check_pre_commit_hook(project_root)
-            requires_local_hook = bool(context.runtime_env.local_vars)
+            requires_local_hook = context.runtime_env.has_sensitive_deps
             if hook_status == "not-git-repo":
                 display.print("  Pre-commit hook: skipped (not a git repo)", style="dim")
             elif requires_local_hook and hook_status == "installed":

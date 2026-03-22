@@ -21,5 +21,5 @@ class PreparedArtifacts:
     """
 
     mcp_servers: list["PreparedMcpServer"] = field(default_factory=list)
-    has_local_env: bool = False
+    has_env_file: bool = False
     binary_dependencies: list["BinaryDependency"] = field(default_factory=list)

@@ -40,14 +40,14 @@ class ProjectArtifactService:
         ]
 
     def _env_artifacts(self, project_root: Path, runtime_env: "RuntimeEnv") -> list[Artifact]:
-        if not runtime_env.local_vars:
+        if not runtime_env.env_deps:
             return []
         env_path = project_root / ".env.ai-sync"
 
         def make_resolve(re=runtime_env, ep=env_path):
             def resolve():
-                local_keys = sorted(re.local_vars.keys())
-                lines = [f"{key}={re.env.get(key, '')}" for key in local_keys]
+                all_keys = sorted(re.env_deps.keys())
+                lines = [f"{key}={re.env.get(key, '')}" for key in all_keys]
                 content = "\n".join(lines) + "\n"
                 return [WriteSpec(file_path=ep, format="text", target="ai-sync:env", value=content)]
 
@@ -61,7 +61,7 @@ class ProjectArtifactService:
                 description="Project-local environment values resolved by ai-sync.",
                 source_alias="project",
                 plan_key=str(env_path),
-                secret_backed=True,
+                secret_backed=runtime_env.has_sensitive_deps,
                 client="global",
                 resolve_fn=make_resolve(),
             )

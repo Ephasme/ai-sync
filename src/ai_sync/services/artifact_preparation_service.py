@@ -92,7 +92,7 @@ class ArtifactPreparationService:
 
         prepared = PreparedArtifacts(
             mcp_servers=prepared_mcp,
-            has_local_env=bool(runtime_env.local_vars),
+            has_env_file=runtime_env.has_sensitive_deps,
             binary_dependencies=collected_binaries,
         )
         return prepared, runtime_env

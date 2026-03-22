@@ -214,7 +214,7 @@ class PlanBuilderService:
         self, project_root: Path, prepared_artifacts: "PreparedArtifacts"
     ) -> list[Artifact]:
         """Create git-safety hook artifacts as first-class EffectSpec producers."""
-        if prepared_artifacts.has_local_env:
+        if prepared_artifacts.has_env_file:
 
             def make_install_resolve() -> list[EffectSpec]:
                 return [

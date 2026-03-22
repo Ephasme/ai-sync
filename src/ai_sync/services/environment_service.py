@@ -36,18 +36,18 @@ class EnvironmentService:
         existing_env = self.read_existing_env_file(project_root)
 
         env: dict[str, str] = {}
-        local_vars: dict[str, EnvDependency] = {}
+        env_deps: dict[str, EnvDependency] = {}
         warnings: list[str] = []
         secret_refs: dict[str, str] = {}
 
         for name in sorted(selected_dependencies):
             dependency = selected_dependencies[name]
+            env_deps[name] = dependency
             if dependency.mode == "literal":
                 assert dependency.literal is not None
                 env[name] = dependency.literal
                 continue
             if dependency.mode == "local":
-                local_vars[name] = dependency
                 if name in existing_env and existing_env[name]:
                     env[name] = existing_env[name]
                 elif dependency.local_default is not None:
@@ -74,10 +74,14 @@ class EnvironmentService:
             except Exception as exc:
                 warnings.append(f"Failed to resolve selected secret references: {exc}")
 
-        unfilled = {name for name in local_vars if name not in env}
+        unfilled = {
+            name
+            for name, dep in env_deps.items()
+            if dep.mode == "local" and name not in env
+        }
         return RuntimeEnv(
             env=env,
-            local_vars=local_vars,
+            env_deps=env_deps,
             unfilled_local_vars=unfilled,
             warnings=warnings,
         )
