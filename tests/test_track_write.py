@@ -169,6 +169,41 @@ def test_record_effect_idempotent(tmp_path: Path) -> None:
     assert effects[0]["baseline"]["prior_mode"] == 33188
 
 
+def test_cleanup_stale_entries_removes_state_when_file_still_desired(tmp_path: Path) -> None:
+    """Stale state entries must be removed even when their file has other desired targets."""
+    store = StateStore(tmp_path)
+    store.load()
+
+    shared_file = tmp_path / ".cursor" / "mcp.json"
+    shared_file.parent.mkdir(parents=True, exist_ok=True)
+    shared_file.write_text('{"mcpServers": {"kept": {}, "removed": {}}}', encoding="utf-8")
+
+    store.ensure_entry(shared_file, "json", "/mcpServers/kept")
+    store.ensure_entry(shared_file, "json", "/mcpServers/removed")
+    store.save()
+
+    desired_targets: set[tuple[str, str, str]] = {
+        (str(shared_file), "json", "/mcpServers/kept"),
+    }
+
+    svc = ManagedOutputService()
+    stale = svc._collect_stale_entries(store, desired_targets)
+    assert len(stale) == 1
+    assert stale[0]["target"] == "/mcpServers/removed"
+
+    stale_specs = svc.build_stale_delete_specs(store, desired_targets)
+    svc.cleanup_stale_entries(store, stale_specs, desired_targets)
+    store.save()
+
+    store2 = StateStore(tmp_path)
+    store2.load()
+    remaining = store2.list_entries()
+    assert len(remaining) == 1
+    assert remaining[0]["target"] == "/mcpServers/kept"
+
+    assert shared_file.exists(), "File must not be deleted when it has other desired targets"
+
+
 def test_managed_output_service_rejects_incompatible_state(tmp_path: Path) -> None:
     state_dir = tmp_path / ".ai-sync" / "state"
     ensure_dir(state_dir)

@@ -239,12 +239,12 @@ class ManagedOutputService:
         desired_file_paths = {fp for fp, _, _ in desired_targets}
         for spec in stale_specs:
             file_path = spec.file_path
+            store.remove_entry(file_path, spec.format, spec.target)
             if str(file_path) in desired_file_paths:
                 continue
             if file_path.is_file() and not file_path.read_text(encoding="utf-8").strip():
                 file_path.unlink(missing_ok=True)
                 dirs_to_clean.add(file_path.parent)
-            store.remove_entry(file_path, spec.format, spec.target)
         for d in sorted(dirs_to_clean, key=lambda p: len(p.parts), reverse=True):
             if d.is_dir() and not any(d.iterdir()):
                 d.rmdir()
