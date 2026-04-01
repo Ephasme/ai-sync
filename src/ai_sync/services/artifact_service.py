@@ -116,6 +116,7 @@ class ArtifactService:
             def resolve():
                 lines = [
                     "## ai-sync Rules (managed)\n",
+                    "\n",
                     "You MUST read and follow ALL rules listed below:\n",
                 ]
                 for rule_ref in rules:
