@@ -7,6 +7,8 @@ import ai_sync.services.tool_version_service as tool_version_service_mod
 
 from ai_sync.services.tool_version_service import ToolVersionService
 
+from conftest import REAL_DETECT_CLIENT_VERSIONS
+
 
 def test_check_client_versions_missing_file(tmp_path: Path) -> None:
     ok, msg = ToolVersionService().check_client_versions(tmp_path / "missing.json")
@@ -34,6 +36,7 @@ def test_check_client_versions_no_versions(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_detect_client_versions_parses_output(monkeypatch) -> None:
+    monkeypatch.setattr(ToolVersionService, "detect_client_versions", REAL_DETECT_CLIENT_VERSIONS)
     service = ToolVersionService()
     monkeypatch.setattr(tool_version_service_mod.shutil, "which", lambda *_args, **_kw: "/bin/codex")
     monkeypatch.setattr(service, "run_command_capture_output", lambda _cmd: "codex 1.2.3")
