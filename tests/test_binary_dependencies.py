@@ -111,7 +111,7 @@ def test_bundle_service_loads_binary_dependencies(tmp_path: Path) -> None:
     svc = ArtifactBundleService()
     _make_bundle(
         tmp_path,
-        "mcp-servers",
+        "mcp_servers",
         "test-server",
         (
             "name: test-server\n"
@@ -124,7 +124,7 @@ def test_bundle_service_loads_binary_dependencies(tmp_path: Path) -> None:
         ),
     )
     bundle = svc.load_artifact_yaml(
-        tmp_path / "mcp-servers" / "test-server" / "artifact.yaml",
+        tmp_path / "mcp_servers" / "test-server" / "artifact.yaml",
         defaults={},
         metadata_keys=None,
         required_keys={"name", "description"},
@@ -320,7 +320,7 @@ def test_collect_binary_deps_across_artifact_kinds(tmp_path: Path) -> None:
     src = tmp_path / "src"
     _write_artifact(
         src,
-        "prompts",
+        "agents",
         "my-agent",
         (
             "name: my-agent\n"

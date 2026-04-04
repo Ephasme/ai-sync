@@ -180,7 +180,7 @@ class PlanBuilderService:
             "skills": manifest.skills,
             "commands": manifest.commands,
             "rules": manifest.rules,
-            "mcp-servers": manifest.mcp_servers,
+            "mcp_servers": manifest.mcp_servers,
         }
 
         plan = ApplyPlan(

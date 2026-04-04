@@ -16,7 +16,7 @@ const selectionLabels: Array<{ key: string; label: string }> = [
   { key: "skills", label: "Skills" },
   { key: "commands", label: "Commands" },
   { key: "rules", label: "Rules" },
-  { key: "mcp-servers", label: "MCP servers" },
+  { key: "mcp_servers", label: "MCP servers" },
 ];
 
 export function DashboardPage() {

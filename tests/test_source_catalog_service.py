@@ -9,14 +9,14 @@ from ai_sync.services.source_catalog_service import SourceCatalogService
 
 
 def _write_source(root: Path) -> None:
-    (root / "prompts" / "engineer").mkdir(parents=True)
-    (root / "prompts" / "engineer" / "artifact.yaml").write_text(
+    (root / "agents" / "engineer").mkdir(parents=True)
+    (root / "agents" / "engineer" / "artifact.yaml").write_text(
         "slug: engineer\n"
         "name: Engineer\n"
         "description: Senior software engineer assistant\n",
         encoding="utf-8",
     )
-    (root / "prompts" / "engineer" / "prompt.md").write_text("## Task\nHelp\n", encoding="utf-8")
+    (root / "agents" / "engineer" / "prompt.md").write_text("## Task\nHelp\n", encoding="utf-8")
 
     (root / "skills" / "code-review").mkdir(parents=True)
     (root / "skills" / "code-review" / "artifact.yaml").write_text(
@@ -46,8 +46,8 @@ def _write_source(root: Path) -> None:
     )
     (root / "rules" / "commit" / "prompt.md").write_text("Commit rules\n", encoding="utf-8")
 
-    (root / "mcp-servers" / "context7").mkdir(parents=True)
-    (root / "mcp-servers" / "context7" / "artifact.yaml").write_text(
+    (root / "mcp_servers" / "context7").mkdir(parents=True)
+    (root / "mcp_servers" / "context7" / "artifact.yaml").write_text(
         "name: Context7\n"
         "description: Library documentation lookup via Context7.\n"
         "method: stdio\n"

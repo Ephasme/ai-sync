@@ -20,14 +20,14 @@ def _write_project(tmp_path: Path) -> tuple[Path, Path]:
     (config_root / "config.toml").write_text('op_account_identifier = "x.1password.com"\n', encoding="utf-8")
 
     source_root = tmp_path / "company-source"
-    (source_root / "prompts" / "engineer").mkdir(parents=True)
-    (source_root / "prompts" / "engineer" / "artifact.yaml").write_text(
+    (source_root / "agents" / "engineer").mkdir(parents=True)
+    (source_root / "agents" / "engineer" / "artifact.yaml").write_text(
         "slug: engineer\n"
         "name: Engineer\n"
         "description: Senior software engineer assistant\n",
         encoding="utf-8",
     )
-    (source_root / "prompts" / "engineer" / "prompt.md").write_text("## Task\nHelp\n", encoding="utf-8")
+    (source_root / "agents" / "engineer" / "prompt.md").write_text("## Task\nHelp\n", encoding="utf-8")
     (source_root / "skills" / "code-review" / "files").mkdir(parents=True)
     (source_root / "skills" / "code-review" / "artifact.yaml").write_text(
         "name: code-review\n"
@@ -50,8 +50,8 @@ def _write_project(tmp_path: Path) -> tuple[Path, Path]:
         encoding="utf-8",
     )
     (source_root / "rules" / "commit" / "prompt.md").write_text("Commit rules\n", encoding="utf-8")
-    (source_root / "mcp-servers" / "context7").mkdir(parents=True)
-    (source_root / "mcp-servers" / "context7" / "artifact.yaml").write_text(
+    (source_root / "mcp_servers" / "context7").mkdir(parents=True)
+    (source_root / "mcp_servers" / "context7" / "artifact.yaml").write_text(
         "name: Context7\n"
         "description: Library documentation lookup via Context7.\n"
         "method: stdio\n"
@@ -82,7 +82,7 @@ def _write_project(tmp_path: Path) -> tuple[Path, Path]:
                 "  - company/session-summary",
                 "rules:",
                 "  - company/commit",
-                "mcp-servers:",
+                "mcp_servers:",
                 "  - company/context7",
                 "",
             ]
@@ -274,7 +274,7 @@ def test_build_plan_context_and_apply_show_and_execute_delete_for_removed_comman
                 "  - company/code-review",
                 "rules:",
                 "  - company/commit",
-                "mcp-servers:",
+                "mcp_servers:",
                 "  - company/context7",
                 "",
             ]
@@ -339,7 +339,7 @@ def test_saved_plan_invalidates_when_prompt_file_changes(tmp_path: Path) -> None
 def test_local_var_preserved_from_existing_env(tmp_path: Path) -> None:
     config_root, project_root = _write_project(tmp_path)
     source_root = tmp_path / "company-source"
-    (source_root / "mcp-servers" / "context7" / "artifact.yaml").write_text(
+    (source_root / "mcp_servers" / "context7" / "artifact.yaml").write_text(
         "name: Context7\n"
         "description: Library documentation lookup via Context7.\n"
         "method: stdio\n"
@@ -365,7 +365,7 @@ def test_local_var_preserved_from_existing_env(tmp_path: Path) -> None:
 def test_unfilled_local_var_referenced_by_mcp_uses_empty_placeholder(tmp_path: Path) -> None:
     config_root, project_root = _write_project(tmp_path)
     source_root = tmp_path / "company-source"
-    (source_root / "mcp-servers" / "context7" / "artifact.yaml").write_text(
+    (source_root / "mcp_servers" / "context7" / "artifact.yaml").write_text(
         "name: Context7\n"
         "description: Library documentation lookup via Context7.\n"
         "method: stdio\n"

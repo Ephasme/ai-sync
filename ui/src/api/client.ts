@@ -3,7 +3,7 @@ export type ManifestSection =
   | "skills"
   | "commands"
   | "rules"
-  | "mcp-servers";
+  | "mcp_servers";
 
 export interface ResolvedSource {
   alias: string;
@@ -26,7 +26,7 @@ export interface ProjectManifestData {
   skills: string[];
   commands: string[];
   rules: string[];
-  "mcp-servers": string[];
+  mcp_servers: string[];
   settings: Record<string, unknown>;
 }
 

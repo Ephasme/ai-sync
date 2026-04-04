@@ -18,14 +18,14 @@ def _write_project(tmp_path: Path) -> tuple[Path, Path]:
     )
 
     source_root = tmp_path / "company-source"
-    (source_root / "prompts" / "engineer").mkdir(parents=True)
-    (source_root / "prompts" / "engineer" / "artifact.yaml").write_text(
+    (source_root / "agents" / "engineer").mkdir(parents=True)
+    (source_root / "agents" / "engineer" / "artifact.yaml").write_text(
         "slug: engineer\n"
         "name: Engineer\n"
         "description: Senior software engineer assistant\n",
         encoding="utf-8",
     )
-    (source_root / "prompts" / "engineer" / "prompt.md").write_text("## Task\nHelp\n", encoding="utf-8")
+    (source_root / "agents" / "engineer" / "prompt.md").write_text("## Task\nHelp\n", encoding="utf-8")
 
     (source_root / "skills" / "code-review").mkdir(parents=True)
     (source_root / "skills" / "code-review" / "artifact.yaml").write_text(
@@ -55,8 +55,8 @@ def _write_project(tmp_path: Path) -> tuple[Path, Path]:
     )
     (source_root / "rules" / "commit" / "prompt.md").write_text("Commit rules\n", encoding="utf-8")
 
-    (source_root / "mcp-servers" / "context7").mkdir(parents=True)
-    (source_root / "mcp-servers" / "context7" / "artifact.yaml").write_text(
+    (source_root / "mcp_servers" / "context7").mkdir(parents=True)
+    (source_root / "mcp_servers" / "context7" / "artifact.yaml").write_text(
         "name: Context7\n"
         "description: Library documentation lookup via Context7.\n"
         "method: stdio\n"
@@ -211,7 +211,7 @@ def test_plan_endpoint_succeeds_with_warning_for_missing_local_env_used_by_mcp(
     project_root = app.state.project_root
     source_root = tmp_path / "company-source"
 
-    (source_root / "mcp-servers" / "context7" / "artifact.yaml").write_text(
+    (source_root / "mcp_servers" / "context7" / "artifact.yaml").write_text(
         "name: Context7\n"
         "description: Library documentation lookup via Context7.\n"
         "method: stdio\n"
@@ -225,7 +225,7 @@ def test_plan_endpoint_succeeds_with_warning_for_missing_local_env_used_by_mcp(
     )
     manifest_path = project_root / ".ai-sync.yaml"
     manifest_path.write_text(
-        manifest_path.read_text(encoding="utf-8") + "mcp-servers:\n  - company/context7\n",
+        manifest_path.read_text(encoding="utf-8") + "mcp_servers:\n  - company/context7\n",
         encoding="utf-8",
     )
 

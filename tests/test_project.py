@@ -20,7 +20,7 @@ def test_project_manifest_from_yaml(tmp_path: Path) -> None:
         "agents": ["company/agent-a"],
         "skills": ["frontend/skill-a"],
         "commands": ["company/c1.md"],
-        "mcp-servers": ["company/srv1"],
+        "mcp_servers": ["company/srv1"],
         "settings": {"mode": "normal"},
     }
     (tmp_path / ".ai-sync.yaml").write_text(yaml.safe_dump(data), encoding="utf-8")

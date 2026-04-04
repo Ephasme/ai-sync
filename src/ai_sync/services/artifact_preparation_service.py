@@ -146,7 +146,7 @@ class ArtifactPreparationService:
             merge_from(ref, bundle.env_dependencies)
 
         for ref in manifest.agents:
-            collect_bundle(ref, "prompts")
+            collect_bundle(ref, "agents")
         for ref in manifest.skills:
             collect_bundle(ref, "skills")
         for ref in manifest.commands:
@@ -212,7 +212,7 @@ class ArtifactPreparationService:
             merge_from(ref, bundle.binary_dependencies)
 
         for ref in manifest.agents:
-            collect_bundle(ref, "prompts")
+            collect_bundle(ref, "agents")
         for ref in manifest.skills:
             collect_bundle(ref, "skills")
         for ref in manifest.commands:

@@ -96,7 +96,7 @@ commands:
 rules:
   - company/commit-conventions
 
-mcp-servers:
+mcp_servers:
   - company/context7
 
 settings:
@@ -160,7 +160,7 @@ A source repo is a catalog of reusable artifacts:
 
 ```text
 <source>/
-├── prompts/
+├── agents/
 │   └── <artifact-id>/
 │       ├── artifact.yaml
 │       ├── prompt.md
@@ -180,18 +180,18 @@ A source repo is a catalog of reusable artifacts:
 │       ├── artifact.yaml
 │       ├── prompt.md
 │       └── files/...   # optional reserved bundle assets
-└── mcp-servers/
+└── mcp_servers/
     └── <server-id>/
         └── artifact.yaml
 ```
 
 ### Resource ids
 
-- Agents come from `prompts/<name>/artifact.yaml` plus `prompts/<name>/prompt.md` and are referenced as `<alias>/<name>`.
+- Agents come from `agents/<name>/artifact.yaml` plus `agents/<name>/prompt.md` and are referenced as `<alias>/<name>`.
 - Skills come from `skills/<name>/artifact.yaml` plus `skills/<name>/prompt.md` and are referenced as `<alias>/<name>`.
 - Commands come from `commands/**/<name>/artifact.yaml` plus sibling `prompt.md` and are referenced as `<alias>/<relative-path>`.
 - Rules come from `rules/<name>/artifact.yaml` plus `rules/<name>/prompt.md` and are referenced as `<alias>/<name>`.
-- MCP servers come from `mcp-servers/<server-id>/artifact.yaml` and are referenced as `<alias>/<server-id>`.
+- MCP servers come from `mcp_servers/<server-id>/artifact.yaml` and are referenced as `<alias>/<server-id>`.
 - MCP-only: rendered subprocess `env` is synthesized from the server's declared `dependencies.env` entries after runtime resolution (optional per-entry `inject_as` renames the subprocess variable while keeping a unique dependency key for merging).
 
 ### Bundle artifact format

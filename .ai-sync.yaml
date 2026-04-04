@@ -1,3 +1,4 @@
+schema_version: 1
 sources:
   base:
     source: git@github.com:Ephasme/ai-sync-config-base.git
@@ -29,7 +30,7 @@ rules:
   - base/code-style
   - base/commit-conventions
   - base/testing
-mcp-servers:
+mcp_servers:
   - base/aws-cloudwatch
   - base/aws-documentation
   - base/aws-pricing

@@ -28,11 +28,7 @@ class ProjectManifest(BaseModel):
     skills: list[str] = Field(default_factory=list)
     commands: list[str] = Field(default_factory=list)
     rules: list[str] = Field(default_factory=list)
-    mcp_servers: list[str] = Field(
-        default_factory=list,
-        validation_alias="mcp-servers",
-        serialization_alias="mcp-servers",
-    )
+    mcp_servers: list[str] = Field(default_factory=list)
     settings: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")

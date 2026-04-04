@@ -10,7 +10,7 @@ BUNDLE_SERVICE = ArtifactBundleService()
 
 
 def test_load_artifact_yaml_reads_sibling_prompt_file(tmp_path: Path) -> None:
-    bundle_dir = tmp_path / "prompts" / "engineer"
+    bundle_dir = tmp_path / "agents" / "engineer"
     bundle_dir.mkdir(parents=True)
     artifact_path = bundle_dir / "artifact.yaml"
     artifact_path.write_text(

@@ -14,11 +14,11 @@ from ai_sync.services.artifact_bundle_service import (
 )
 
 _RESOURCE_KINDS: tuple[tuple[str, str], ...] = (
-    ("prompts", "agent"),
+    ("agents", "agent"),
     ("skills", "skill"),
     ("commands", "command"),
     ("rules", "rule"),
-    ("mcp-servers", "mcp-server"),
+    ("mcp_servers", "mcp-server"),
 )
 
 

@@ -23,7 +23,7 @@ from ai_sync.web.dependencies import (
 
 api_router = APIRouter()
 
-_MANIFEST_SELECTION_SECTIONS = {"agents", "skills", "commands", "rules", "mcp-servers"}
+_MANIFEST_SELECTION_SECTIONS = {"agents", "skills", "commands", "rules", "mcp_servers"}
 _EMPTY_SELECTIONS = {section: [] for section in _MANIFEST_SELECTION_SECTIONS}
 
 
@@ -226,7 +226,7 @@ def _serialize_selections(manifest: ProjectManifest) -> dict[str, list[str]]:
         "skills": list(manifest.skills),
         "commands": list(manifest.commands),
         "rules": list(manifest.rules),
-        "mcp-servers": list(manifest.mcp_servers),
+        "mcp_servers": list(manifest.mcp_servers),
     }
 
 
@@ -237,7 +237,7 @@ def _empty_manifest() -> dict[str, Any]:
         "skills": [],
         "commands": [],
         "rules": [],
-        "mcp-servers": [],
+        "mcp_servers": [],
         "settings": {},
     }
 

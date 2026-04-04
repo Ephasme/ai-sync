@@ -96,17 +96,17 @@ def _resolved(alias: str, root: Path) -> ResolvedSource:
 
 def _make_repo_root(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
-    (root / "prompts" / "agent").mkdir(parents=True)
+    (root / "agents" / "agent").mkdir(parents=True)
     (root / "skills" / "skill-one" / "files").mkdir(parents=True)
     (root / "commands" / "shortcut").mkdir(parents=True)
     (root / "rules" / "commit").mkdir(parents=True)
-    (root / "prompts" / "agent" / "artifact.yaml").write_text(
+    (root / "agents" / "agent" / "artifact.yaml").write_text(
         "slug: agent\n"
         "name: Agent\n"
         "description: General agent assistant\n",
         encoding="utf-8",
     )
-    (root / "prompts" / "agent" / "prompt.md").write_text("## Task\nDo thing\n", encoding="utf-8")
+    (root / "agents" / "agent" / "prompt.md").write_text("## Task\nDo thing\n", encoding="utf-8")
     (root / "skills" / "skill-one" / "artifact.yaml").write_text(
         "name: skill-one\n"
         "description: Example skill\n"
@@ -128,8 +128,8 @@ def _make_repo_root(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     (root / "rules" / "commit" / "prompt.md").write_text("Commit rules\n", encoding="utf-8")
-    (root / "mcp-servers" / "srv").mkdir(parents=True)
-    (root / "mcp-servers" / "srv" / "artifact.yaml").write_text(
+    (root / "mcp_servers" / "srv").mkdir(parents=True)
+    (root / "mcp_servers" / "srv" / "artifact.yaml").write_text(
         "name: Example MCP\n"
         "description: Example MCP server for test coverage.\n"
         "method: stdio\n"
@@ -430,14 +430,14 @@ def test_command_artifacts_produce_write_specs(tmp_path: Path) -> None:
 
 def test_agent_artifacts_use_scoped_alias(tmp_path: Path) -> None:
     repo_a = tmp_path / "repo-a"
-    (repo_a / "prompts" / "agent").mkdir(parents=True)
-    (repo_a / "prompts" / "agent" / "artifact.yaml").write_text(
+    (repo_a / "agents" / "agent").mkdir(parents=True)
+    (repo_a / "agents" / "agent" / "artifact.yaml").write_text(
         "slug: agent\n"
         "name: Agent\n"
         "description: Agent from repo A\n",
         encoding="utf-8",
     )
-    (repo_a / "prompts" / "agent" / "prompt.md").write_text("## From A\n", encoding="utf-8")
+    (repo_a / "agents" / "agent" / "prompt.md").write_text("## From A\n", encoding="utf-8")
 
     project_root = tmp_path / "project"
     project_root.mkdir()

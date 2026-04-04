@@ -39,7 +39,7 @@ class AgentArtifactService:
             alias, agent_name = split_scoped_ref(agent_ref)
             agent_rel = Path(agent_name)
             artifact_path = self._artifact_bundle_service.bundle_entry_path(
-                resolved_sources[alias].root / "prompts",
+                resolved_sources[alias].root / "agents",
                 agent_rel,
             )
             if not artifact_path.exists():

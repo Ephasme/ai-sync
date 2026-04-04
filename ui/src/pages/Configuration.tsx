@@ -50,7 +50,7 @@ const kindToSection: Record<string, ManifestSection> = {
   skill: "skills",
   command: "commands",
   rule: "rules",
-  "mcp-server": "mcp-servers",
+  "mcp-server": "mcp_servers",
 };
 
 const kindLabels: Record<string, string> = {

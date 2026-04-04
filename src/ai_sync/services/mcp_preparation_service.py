@@ -25,7 +25,7 @@ class McpPreparationService:
     """McpPreparationService loads and filters MCP server definitions from configured sources."""
 
     def load_manifest(self, mcp_root: Path, display: DisplayService) -> dict:
-        servers_dir = mcp_root / "mcp-servers"
+        servers_dir = mcp_root / "mcp_servers"
         if not servers_dir.exists():
             return {}
 
