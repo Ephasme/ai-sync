@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from ai_sync.data_classes.artifact import Artifact
 from ai_sync.data_classes.write_spec import WriteSpec
-from ai_sync.models import split_scoped_ref
 from ai_sync.services.artifact_collector_service import ArtifactCollectorService
 
 if TYPE_CHECKING:
@@ -82,6 +81,7 @@ class ArtifactService:
                 clients=clients,
             ),
             *self._rule_index_artifacts(manifest=manifest, project_root=project_root),
+            *self._claude_md_artifacts(project_root=project_root),
             *self._mcp_artifact_service.collect_artifacts(
                 project_root=project_root,
                 manifest=manifest,
@@ -100,6 +100,12 @@ class ArtifactService:
             ),
         ]
 
+    _RULES_INDEX_BODY = (
+        "## ai-sync Rules (managed)\n"
+        "\n"
+        "You MUST read and follow ALL rule files in the `.ai-sync/rules/` directory.\n"
+    )
+
     def _rule_index_artifacts(
         self,
         *,
@@ -111,20 +117,10 @@ class ArtifactService:
 
         agents_md = project_root / "AGENTS.md"
         marker_id = "ai-sync:rules-index"
+        body = self._RULES_INDEX_BODY
 
-        def make_resolve(rules=list(manifest.rules), pr=project_root):
+        def make_resolve(pr: Path = project_root, content: str = body):
             def resolve():
-                lines = [
-                    "## ai-sync Rules (managed)\n",
-                    "\n",
-                    "You MUST read and follow ALL rules listed below:\n",
-                ]
-                for rule_ref in rules:
-                    alias, rule_name = split_scoped_ref(rule_ref)
-                    prefixed = f"{alias}-{rule_name}"
-                    rel_path = f".ai-sync/rules/{prefixed}.md"
-                    lines.append(f"- [{rule_name}]({rel_path})")
-                content = "\n".join(lines) + "\n"
                 return [
                     WriteSpec(
                         file_path=pr / "AGENTS.md",
@@ -144,6 +140,41 @@ class ArtifactService:
                 description="Managed AGENTS.md links for selected rules.",
                 source_alias="project",
                 plan_key=f"{agents_md}#{marker_id}",
+                secret_backed=False,
+                client="global",
+                resolve_fn=make_resolve(),
+            )
+        ]
+
+    _CLAUDE_MD_BODY = "@AGENTS.md\n"
+
+    def _claude_md_artifacts(self, *, project_root: Path) -> list[Artifact]:
+        """Generate a gitignored CLAUDE.md that imports AGENTS.md for Claude Code."""
+        claude_md = project_root / "CLAUDE.md"
+        marker_id = "ai-sync:claude-import"
+        body = self._CLAUDE_MD_BODY
+
+        def make_resolve(pr: Path = project_root, content: str = body):
+            def resolve():
+                return [
+                    WriteSpec(
+                        file_path=pr / "CLAUDE.md",
+                        format="text",
+                        target=marker_id,
+                        value=content,
+                    )
+                ]
+
+            return resolve
+
+        return [
+            Artifact(
+                kind="claude-import",
+                resource="CLAUDE.md",
+                name="CLAUDE.md import",
+                description="Gitignored CLAUDE.md that imports AGENTS.md for Claude Code.",
+                source_alias="project",
+                plan_key=str(claude_md),
                 secret_backed=False,
                 client="global",
                 resolve_fn=make_resolve(),

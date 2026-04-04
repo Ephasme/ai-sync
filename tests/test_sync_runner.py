@@ -272,7 +272,7 @@ def test_run_apply_writes_rules_and_index(tmp_path: Path) -> None:
 
     agents_content = agents_md.read_text(encoding="utf-8")
     assert "# User Instructions" in agents_content
-    assert "company-commit" in agents_content
+    assert ".ai-sync/rules/" in agents_content
 
 
 def test_run_apply_removes_stale_rules(tmp_path: Path) -> None:
@@ -319,7 +319,7 @@ def test_run_apply_removes_stale_rules(tmp_path: Path) -> None:
 
     agents_content = agents_md.read_text(encoding="utf-8")
     assert "# User Instructions" in agents_content
-    assert "company-commit" not in agents_content
+    assert ".ai-sync/rules/" not in agents_content
 
 
 # ---------------------------------------------------------------------------

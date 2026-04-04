@@ -140,11 +140,11 @@ description: {description}
     def build_instructions_specs(self, instructions_content: str) -> list[WriteSpec]:
         if not instructions_content.strip():
             return []
-        claude_md = self._project_root / "CLAUDE.md"
+        agents_md = self._project_root / "AGENTS.md"
         section = f"## Project Instructions (ai-sync)\n\n{instructions_content.strip()}\n"
         return [
             WriteSpec(
-                file_path=claude_md,
+                file_path=agents_md,
                 format="text",
                 target="ai-sync:instructions",
                 value=section,

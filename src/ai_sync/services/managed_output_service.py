@@ -126,6 +126,7 @@ class ManagedOutputService:
             or marker_id.startswith("ai-sync:command:")
             or marker_id.startswith("ai-sync:rule:")
             or marker_id == "ai-sync:env"
+            or marker_id == "ai-sync:claude-import"
         )
 
     def renders_full_file(self, specs: list[WriteSpec]) -> bool:
