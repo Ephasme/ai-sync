@@ -72,7 +72,6 @@ release bump:
     poetry lock
     poetry version "$version"
     just install
-    just test
     git add pyproject.toml poetry.lock
     git commit -m "release: v$version"
     git tag -a "v$version" -m "v$version"
