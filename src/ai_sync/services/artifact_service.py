@@ -101,9 +101,11 @@ class ArtifactService:
         ]
 
     _RULES_INDEX_BODY = (
+        "\n"
         "## ai-sync Rules (managed)\n"
         "\n"
         "You MUST read and follow ALL rule files in the `.ai-sync/rules/` directory.\n"
+        "\n"
     )
 
     def _rule_index_artifacts(
