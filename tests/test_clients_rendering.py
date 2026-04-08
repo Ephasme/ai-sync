@@ -47,6 +47,51 @@ def test_gemini_build_mcp_entry_oauth() -> None:
     assert entry["oauth"]["clientId"] == "id"
 
 
+def test_cursor_build_mcp_entry_oauth() -> None:
+    client = CursorClient(Path("/tmp/test"))
+    entry = client._build_mcp_entry(
+        "s",
+        {
+            "method": "http",
+            "url": "https://x",
+            "oauth": {
+                "enabled": True,
+                "clientId": "cid",
+                "clientSecret": "sec",
+                "authorizationUrl": "https://auth.example/authorize",
+                "tokenUrl": "https://auth.example/token",
+                "scopes": ["https://example.com/scope"],
+            },
+        },
+        {"servers": {}},
+    )
+    assert entry["oauth"]["clientId"] == "cid"
+    assert entry["oauth"]["clientSecret"] == "sec"
+    assert entry["oauth"]["scopes"] == ["https://example.com/scope"]
+    assert entry["oauth"]["authorizationUrl"] == "https://auth.example/authorize"
+
+
+def test_codex_build_mcp_entry_oauth() -> None:
+    client = CodexClient(Path("/tmp/test"))
+    entry = client._build_mcp_entry(
+        "s",
+        {
+            "method": "http",
+            "url": "https://x",
+            "oauth": {
+                "enabled": True,
+                "clientId": "cid",
+                "clientSecret": "sec",
+                "scopes": ["s"],
+            },
+        },
+        {"servers": {}},
+    )
+    assert entry["oauth"]["clientId"] == "cid"
+    assert entry["oauth"]["clientSecret"] == "sec"
+    assert entry["oauth"]["scopes"] == ["s"]
+
+
 def test_codex_build_mcp_entry_with_description_and_timeout() -> None:
     client = CodexClient(Path("/tmp/test"))
     entry = client._build_mcp_entry(
