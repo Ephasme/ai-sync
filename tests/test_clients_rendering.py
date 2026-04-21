@@ -183,6 +183,32 @@ def test_claude_build_mcp_entry_http() -> None:
     assert entry["headers"] == {"Authorization": "Bearer tok"}
 
 
+def test_claude_build_mcp_entry_oauth_snake_case_credentials() -> None:
+    """Claude Code expects client_id/client_secret for some OAuth providers (e.g. Google token)."""
+    client = ClaudeClient(Path("/tmp/test"))
+    entry = client._build_mcp_entry(
+        "s",
+        {
+            "method": "http",
+            "url": "https://bigquery.googleapis.com/mcp",
+            "oauth": {
+                "clientId": "cid.apps.googleusercontent.com",
+                "clientSecret": "shh",
+                "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+                "tokenUrl": "https://oauth2.googleapis.com/token",
+                "scopes": ["https://www.googleapis.com/auth/bigquery"],
+            },
+        },
+        {"servers": {}},
+    )
+    o = entry["oauth"]
+    assert o["clientId"] == "cid.apps.googleusercontent.com"
+    assert o["clientSecret"] == "shh"
+    assert o["client_id"] == "cid.apps.googleusercontent.com"
+    assert o["client_secret"] == "shh"
+    assert o["scopes"] == ["https://www.googleapis.com/auth/bigquery"]
+
+
 def test_claude_build_mcp_entry_stdio_with_secret_env() -> None:
     client = ClaudeClient(Path("/tmp/test"))
     entry = client._build_mcp_entry(

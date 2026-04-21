@@ -75,7 +75,13 @@ description: {description}
             entry["env"] = env
 
         oauth_cfg = server.get("oauth", {})
-        oauth_src = secret_srv.get("oauth") or secret_srv.get("auth") or server.get("auth") or {}
+        oauth_src = (
+            secret_srv.get("oauth")
+            or secret_srv.get("auth")
+            or server.get("oauth")
+            or server.get("auth")
+            or {}
+        )
         oauth_entry: dict = {}
         for key in ("clientId", "clientSecret", "authorizationUrl", "tokenUrl", "issuer", "redirectUri"):
             val = oauth_cfg.get(key) or oauth_src.get(key)
@@ -85,6 +91,12 @@ description: {description}
         if isinstance(scopes, list) and scopes:
             oauth_entry["scopes"] = [str(s) for s in scopes]
         if oauth_entry:
+            # Claude Code's MCP OAuth path reads RFC-style snake_case credentials for token
+            # exchange; camelCase alone can yield "client_secret is missing" from Google.
+            if "clientId" in oauth_entry:
+                oauth_entry.setdefault("client_id", oauth_entry["clientId"])
+            if "clientSecret" in oauth_entry:
+                oauth_entry.setdefault("client_secret", oauth_entry["clientSecret"])
             entry["oauth"] = oauth_entry
 
         return entry
